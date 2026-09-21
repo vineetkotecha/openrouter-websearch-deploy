@@ -10,6 +10,7 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci --omit=dev
 COPY --from=build /app/dist ./dist
+COPY migrations ./migrations
 USER node
 EXPOSE 8787
 CMD ["node","dist/cli.js","--http"]
