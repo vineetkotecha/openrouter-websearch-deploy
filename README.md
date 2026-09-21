@@ -7,7 +7,7 @@ A production-shaped, open search control plane for AI agents. It turns a consume
 - MCP-first `personalized_web_search` tool
 - authenticated HTTP control-plane endpoints
 - dynamic mandate writing with Gemini 2.5 Flash and a deterministic fallback
-- eight adapter slots: Tavily, Exa, Brave, Serper, SerpApi, Google Programmable Search, Perplexity and Gemini Deep Research
+- ten adapter slots: Tavily, Exa, Brave, Serper, SerpApi, Google Programmable Search, Perplexity, Jina, Firecrawl and Gemini Deep Research
 - bounded parallel fan-out, normalization, canonical-URL deduplication and baseline reranking
 - permission-aware `needs_input` response for the one-question human fallback
 - outcome contract, 30-day retention semantics, Postgres schema, containers and CI

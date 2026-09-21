@@ -23,5 +23,17 @@ services:
         sync: false
       - key: SERPER_API_KEY
         sync: false
+      - key: SERPAPI_API_KEY
+        sync: false
+      - key: PERPLEXITY_API_KEY
+        sync: false
+      - key: JINA_API_KEY
+        sync: false
+      - key: FIRECRAWL_API_KEY
+        sync: false
+      - key: GOOGLE_CSE_API_KEY
+        sync: false
+      - key: GOOGLE_CSE_ID
+        sync: false
       - key: SEARCH_TIMEOUT_MS
         value: "8000"
