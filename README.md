@@ -78,3 +78,20 @@ Gemini Deep Research has an adapter slot but deliberately returns no results unt
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE).
+
+## Hosted MCP
+
+The production-compatible MCP endpoint is `https://divaine-search-harness.onrender.com/mcp`. It uses Streamable HTTP and the same bearer API key as REST.
+
+Claude/OpenAI-compatible MCP configuration:
+```json
+{
+  "mcpServers": {
+    "divaine-search": {
+      "url": "https://divaine-search-harness.onrender.com/mcp",
+      "headers": {"Authorization": "Bearer dv_REPLACE_WITH_YOUR_KEY"}
+    }
+  }
+}
+```
+The hosted endpoint was validated with the official Model Context Protocol TypeScript client: initialize, list tools and `personalized_web_search` all complete remotely.

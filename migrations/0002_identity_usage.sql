@@ -6,3 +6,9 @@ ALTER TABLE episodes ADD COLUMN IF NOT EXISTS api_key_id uuid REFERENCES api_key
 ALTER TABLE episodes ADD COLUMN IF NOT EXISTS duration_ms integer;
 CREATE TABLE IF NOT EXISTS usage_events(id uuid PRIMARY KEY, tenant_id uuid NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, user_id uuid REFERENCES users(id) ON DELETE SET NULL, api_key_id uuid REFERENCES api_keys(id) ON DELETE SET NULL, episode_id uuid REFERENCES episodes(id) ON DELETE SET NULL, surface text NOT NULL, provider text, request_count integer NOT NULL DEFAULT 1, result_count integer NOT NULL DEFAULT 0, duration_ms integer, estimated_cost_usd numeric(12,6) NOT NULL DEFAULT 0, created_at timestamptz NOT NULL DEFAULT now());
 CREATE INDEX IF NOT EXISTS usage_tenant_created_idx ON usage_events(tenant_id,created_at DESC);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash text;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS verified_at timestamptz;
+CREATE TABLE IF NOT EXISTS sessions(id uuid PRIMARY KEY,user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,token_hash text NOT NULL UNIQUE,expires_at timestamptz NOT NULL,created_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE IF NOT EXISTS verification_tokens(id uuid PRIMARY KEY,user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,token_hash text NOT NULL UNIQUE,expires_at timestamptz NOT NULL,used_at timestamptz,created_at timestamptz NOT NULL DEFAULT now());
+ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS used_today integer NOT NULL DEFAULT 0;
+ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS usage_day date NOT NULL DEFAULT current_date;
