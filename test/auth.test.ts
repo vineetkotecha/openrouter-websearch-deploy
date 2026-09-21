@@ -1,0 +1,1 @@
+import{describe,it,expect}from"vitest";import{ResumeTokens}from"../src/core/resume.js";describe("resume token",()=>{it("round trips and rejects tampering",()=>{const r=new ResumeTokens("a secure test secret that is long enough");const t=r.issue("episode-1");expect(r.verify(t)).toBe("episode-1");expect(r.verify(t+"x")).toBeNull()})});
