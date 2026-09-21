@@ -1,0 +1,8 @@
+CREATE TABLE IF NOT EXISTS tenants(id uuid PRIMARY KEY, name text NOT NULL, created_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE IF NOT EXISTS users(id uuid PRIMARY KEY, tenant_id uuid NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, email text NOT NULL UNIQUE, display_name text, role text NOT NULL DEFAULT 'user' CHECK(role IN ('user','admin')), created_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE IF NOT EXISTS api_keys(id uuid PRIMARY KEY, tenant_id uuid NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE, name text NOT NULL DEFAULT 'default', prefix text NOT NULL, secret_hash text NOT NULL, scopes text[] NOT NULL DEFAULT ARRAY['search','mcp','dashboard'], quota_daily integer NOT NULL DEFAULT 100, expires_at timestamptz, revoked_at timestamptz, created_at timestamptz NOT NULL DEFAULT now());
+CREATE INDEX IF NOT EXISTS api_keys_prefix_idx ON api_keys(prefix);
+ALTER TABLE episodes ADD COLUMN IF NOT EXISTS api_key_id uuid REFERENCES api_keys(id) ON DELETE SET NULL;
+ALTER TABLE episodes ADD COLUMN IF NOT EXISTS duration_ms integer;
+CREATE TABLE IF NOT EXISTS usage_events(id uuid PRIMARY KEY, tenant_id uuid NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, user_id uuid REFERENCES users(id) ON DELETE SET NULL, api_key_id uuid REFERENCES api_keys(id) ON DELETE SET NULL, episode_id uuid REFERENCES episodes(id) ON DELETE SET NULL, surface text NOT NULL, provider text, request_count integer NOT NULL DEFAULT 1, result_count integer NOT NULL DEFAULT 0, duration_ms integer, estimated_cost_usd numeric(12,6) NOT NULL DEFAULT 0, created_at timestamptz NOT NULL DEFAULT now());
+CREATE INDEX IF NOT EXISTS usage_tenant_created_idx ON usage_events(tenant_id,created_at DESC);
