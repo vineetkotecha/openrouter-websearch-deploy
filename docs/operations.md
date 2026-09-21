@@ -2,7 +2,7 @@
 
 ## Startup
 
-Apply `migrations/0001_core.sql` to Postgres 16 with pgvector. Supply `DATABASE_URL`; without it the process uses an intentionally ephemeral in-memory store. Inject provider and model keys from the cloud secret manager.
+The managed database is Neon Postgres 16 with pgvector in AWS Singapore. Apply `migrations/0001_core.sql` during deployment and supply `DATABASE_URL` from the deployment secret manager. The process refuses durable production expectations without this value; the memory store is test-only. Inject provider and model keys from the same secret manager.
 
 ## Health and scaling
 

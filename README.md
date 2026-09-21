@@ -28,7 +28,7 @@ npm run dev            # MCP over stdio
 npm run dev -- --http  # HTTP on :8787
 ```
 
-No provider key is required to boot, test, inspect contracts, or exercise the no-key path. Add free-tier keys to enable adapters. Never commit `.env`.
+No provider key is required to build or test. Runtime persistence uses a cloud `DATABASE_URL`; the production value belongs in a deployment secret manager. Add free-tier search keys to enable adapters. Never commit `.env`.
 
 ## HTTP
 
@@ -73,7 +73,7 @@ If a material gap remains and `may_ask_user` is true, the response status is `ne
 
 ## Current implementation boundary
 
-Gemini Deep Research has an adapter slot but deliberately returns no results until its asynchronous research API lifecycle is wired against a confirmed key/project. Gemini reranking currently falls back to deterministic scoring if the model call is absent or fails. The Postgres schema is included; the default process uses the in-memory store so local runs require no database. The next unit is durable storage, resume handling, dashboard and source-page faithfulness verification.
+Gemini Deep Research has an adapter slot but deliberately returns no results until its asynchronous research API lifecycle is wired against a confirmed key/project. Gemini reranking currently falls back to deterministic scoring if the model call is absent or fails. The Postgres schema is deployed to the managed Neon project in Singapore. The in-memory store exists only for isolated tests; production requires `DATABASE_URL`. The next unit is resume handling, deployment, dashboard persistence and source-page faithfulness verification.
 
 ## License
 
