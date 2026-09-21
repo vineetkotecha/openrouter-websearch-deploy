@@ -1,52 +1,80 @@
-# openrouter-websearch
+# divAIne Search Harness
 
-An MCP server that gives any agent web search through [OpenRouter](https://openrouter.ai).
-One tool in, answers with citations out.
+A production-shaped, open search control plane for AI agents. It turns a consumer search request and permitted context into an inspectable mandate, translates that mandate across search providers, normalizes and deduplicates results, ranks source records against the mandate, preserves provenance, and captures downstream outcomes.
 
-## The tool
+## What is here
 
-**`web_search`**
+- MCP-first `personalized_web_search` tool
+- authenticated HTTP control-plane endpoints
+- dynamic mandate writing with Gemini 2.5 Flash and a deterministic fallback
+- eight adapter slots: Tavily, Exa, Brave, Serper, SerpApi, Google Programmable Search, Perplexity and Gemini Deep Research
+- bounded parallel fan-out, normalization, canonical-URL deduplication and baseline reranking
+- permission-aware `needs_input` response for the one-question human fallback
+- outcome contract, 30-day retention semantics, Postgres schema, containers and CI
+- architecture decisions in `docs/adr`
 
-| Input | Type | Description |
-| --- | --- | --- |
-| `query` | string (required) | What to search for, in natural language. |
-| `model` | string (optional) | OpenRouter model. Defaults to `OPENROUTER_MODEL` or `openai/gpt-4o:online`. |
-| `max_results` | int (optional) | How many web results the engine consults (1-20, default 5). |
+This is not a crawler, a search index, or a general answer generator. It returns ranked resources with evidence state so the calling agent owns answer composition.
 
-Returns a synthesized answer with source links, plus token/cost usage when
-OpenRouter reports it.
+## Quick start
 
-How it works: OpenRouter adds live web search to any chat model, either with
-the `:online` model suffix or the `web` plugin. This server picks the right one
-automatically, so search works whatever model you point it at.
-
-## Setup
+Requires Node 22.
 
 ```bash
-npm install
-export OPENROUTER_API_KEY=sk-or-...   # https://openrouter.ai/keys
-npm start
+cp .env.example .env
+npm ci
+npm test
+npm run build
+npm run dev            # MCP over stdio
+npm run dev -- --http  # HTTP on :8787
 ```
 
-Optional env:
+No provider key is required to boot, test, inspect contracts, or exercise the no-key path. Add free-tier keys to enable adapters. Never commit `.env`.
 
-- `OPENROUTER_MODEL` - default model (default `openai/gpt-4o:online`)
-- `OPENROUTER_SITE_URL` / `OPENROUTER_APP_NAME` - attribution headers shown on your OpenRouter dashboard
+## HTTP
 
-## MCP client config
+All non-health endpoints require `Authorization: Bearer <key>`. Development defaults map `dev-key` to tenant `local`; replace `DIVAINe_API_KEYS` outside local development.
 
-Claude Desktop / any MCP host:
+```bash
+curl -s http://localhost:8787/v1/search \
+  -H 'authorization: Bearer dev-key' \
+  -H 'content-type: application/json' \
+  -d '{
+    "query":"quiet laptop for shared office work",
+    "tenant_id":"local",
+    "user_id":"opaque-user-1",
+    "permissions":{"may_pull_context":true,"may_ask_user":false,"may_retain":true},
+    "context":[{"key":"budget","value":"under 1200 USD","source":"caller","confidence":1}]
+  }'
+```
+
+If a material gap remains and `may_ask_user` is true, the response status is `needs_input` with exactly one question and a resumable token. Otherwise it searches with explicit limitations.
+
+## MCP configuration
 
 ```json
 {
   "mcpServers": {
-    "web-search": {
+    "divaine-search": {
       "command": "node",
-      "args": ["/path/to/openrouter-websearch/src/index.js"],
-      "env": { "OPENROUTER_API_KEY": "sk-or-..." }
+      "args": ["/absolute/path/openrouter-websearch/dist/cli.js"],
+      "env": {"GEMINI_API_KEY": "...", "TAVILY_API_KEY": "..."}
     }
   }
 }
 ```
 
-Requires Node.js 18+.
+## Security and data behavior
+
+- API keys are tenant-scoped at ingress. Production deployments should inject them from a secret manager.
+- Provider credentials are read from process environment and are never stored in episode records.
+- Context use is explicit and evidence-tagged. Human questions are permission-gated.
+- Data retention defaults to 30 days. Cross-tenant learning is off by default.
+- Provider output is untrusted data. The baseline core ranks metadata and snippets; future page extraction must be sandboxed, size-limited and protected against SSRF before use.
+
+## Current implementation boundary
+
+Gemini Deep Research has an adapter slot but deliberately returns no results until its asynchronous research API lifecycle is wired against a confirmed key/project. Gemini reranking currently falls back to deterministic scoring if the model call is absent or fails. The Postgres schema is included; the default process uses the in-memory store so local runs require no database. The next unit is durable storage, resume handling, dashboard and source-page faithfulness verification.
+
+## License
+
+Apache-2.0. See [LICENSE](LICENSE).

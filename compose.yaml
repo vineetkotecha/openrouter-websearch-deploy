@@ -1,0 +1,13 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment: {POSTGRES_PASSWORD: postgres, POSTGRES_DB: divaine}
+    ports: ["5432:5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+  harness:
+    build: .
+    env_file: .env
+    command: ["node","dist/cli.js","--http"]
+    ports: ["8787:8787"]
+    depends_on: [postgres]
+volumes: {pgdata: {}}
