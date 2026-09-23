@@ -13,6 +13,9 @@ const TYPED: { test: RegExp; re: RegExp; parse: (m: RegExpMatchArray) => string 
   { test: /^(rating|stars|score)$/, re: /\b([0-5](?:\.[0-9])?)\s?(?:\/\s?5|out of 5|stars?)\b/i, parse: m => Number(m[1] ?? "") },
   { test: /^(reviews?|review count|ratings count)$/, re: /\b([0-9][0-9,]*)\s+(?:reviews|ratings)\b/i, parse: m => Number((m[1] ?? "").replace(/,/g, "")) },
   { test: /^(date|published|release date|updated)$/, re: /\b(20[0-9]{2}-[01][0-9]-[0-3][0-9]|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.? [0-3]?[0-9],? 20[0-9]{2})\b/i, parse: m => m[1] ?? "" },
+  { test: /^(weight|mass)$/, re: /weigh[a-z]*[^0-9\n]{0,30}([0-9]+(?:\.[0-9]+)?\s?(?:g|grams|kg|oz|ounces|lbs?)\b)/i, parse: m => (m[1] ?? "").trim() },
+  { test: /^(drop|heel drop|offset|heel to toe drop)$/, re: /(?:drop|offset)[^0-9\n]{0,30}([0-9]+(?:\.[0-9]+)?\s?mm\b)/i, parse: m => (m[1] ?? "").trim() },
+  { test: /^(stack|stack height)$/, re: /stack[^0-9\n]{0,30}([0-9]+(?:\.[0-9]+)?\s?mm\b)/i, parse: m => (m[1] ?? "").trim() },
   { test: /^(email|contact email)$/, re: /\b[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}\b/i, parse: m => m[0] ?? "" },
   { test: /^(phone|telephone|contact number)$/, re: /(?:\+?[0-9][0-9 ()-]{8,}[0-9])/, parse: m => (m[0] ?? "").trim() },
 ];

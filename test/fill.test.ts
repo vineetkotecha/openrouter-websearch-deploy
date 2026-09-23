@@ -18,3 +18,19 @@ describe("structured fill", () => {
     expect(s).toEqual({ fields: ["price", "drop"], pages: 2, coverage: { price: 2, drop: 0 } });
   });
 });
+import { extractSurvivors } from "../src/core/verify.js";
+describe("extraction survives a failing judge", () => {
+  it("falls back to deterministic grading and still fills fields", async () => {
+    const fetcher: any = async () => ({ ok: true, text: async () => "Price: $120\nsome page text about shoes" });
+    const judge = async () => { throw new Error("403 project denied"); };
+    const { results, report } = await extractSurvivors([{ provider: "exa", url: "https://a.example.com/x", title: "shoe", snippet: "" }], undefined, { fetcher, judge, fields: ["price"] });
+    expect(report.extracted).toBe(1); const r: any = results[0];
+    expect(r.raw.verified_content).toBe(true); expect(r.fields.price.value).toBe("$120");
+  });
+});
+describe("review-page phrasing", () => {
+  it("reads unlabelled weight and drop near their keyword", () => {
+    const f = fillFields(["weight", "drop", "stack height"], "The Kayano 31 weighs in at 10.8 oz for a men's 9. It has a heel-to-toe drop of 10 mm and a stack of 40 mm at the heel.");
+    expect(f.weight.value).toBe("10.8 oz"); expect(f.drop.value).toBe("10 mm"); expect(f["stack height"].value).toBe("40 mm");
+  });
+});
