@@ -20,6 +20,7 @@ export type NeedsInput = { status: "needs_input"; episode_id: string; question: 
 export class SearchHarness {
   readonly health: ProviderHealth;
   ask?: AskFn;
+  get mandateWriter(): MandateWriter { return this.writer; }
   constructor(private c: Config, private writer: MandateWriter, private providers: SearchProvider[], private store: EpisodeStore, private opts: HarnessOptions = {}) {
     this.health = opts.health ?? new ProviderHealth();
   }
