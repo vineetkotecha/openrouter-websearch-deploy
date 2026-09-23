@@ -1,0 +1,28 @@
+// Generated from eval/mandate-cases.json so the cases ship inside the build.
+export const MANDATE_CASES = [
+ {"id":"price-cap","query":"running shoes for flat feet under $100","functional":[{"match":"price|budget|100","hard":true},{"match":"flat.?feet|arch|stability"}],"gap":false},
+ {"id":"spec-ram","query":"quiet laptop for a shared office with 16GB RAM","functional":[{"match":"ram|memory|16","hard":true},{"match":"quiet|noise|fan"}],"gap":false},
+ {"id":"location","query":"vegetarian thali near Koramangala open now","functional":[{"match":"vegetarian|veg","hard":true},{"match":"koramangala|location|near","hard":true},{"match":"open"}],"gap":false},
+ {"id":"date-window","query":"flights Bangalore to Goa on 12 October under 5000 rupees","functional":[{"match":"date|october|12","hard":true},{"match":"price|budget|5000","hard":true},{"match":"goa|destination|route"}],"gap":false},
+ {"id":"brand-exclude","query":"wireless earbuds not Apple, good for calls","functional":[{"match":"apple|brand|exclude","hard":true},{"match":"call|mic|voice"}],"gap":false},
+ {"id":"size","query":"men's rain jacket size L packable","functional":[{"match":"size|\\bl\\b|large","hard":true},{"match":"pack"}],"gap":false},
+ {"id":"dietary","query":"gluten free birthday cake delivery in Pune tomorrow","functional":[{"match":"gluten","hard":true},{"match":"pune|location|deliver","hard":true},{"match":"tomorrow|date|time"}],"gap":false},
+ {"id":"compat","query":"USB-C charger compatible with MacBook Air M2, 65W","functional":[{"match":"usb.?c|compat|macbook","hard":true},{"match":"65|watt|power"}],"gap":false},
+ {"id":"filings","query":"Infosys quarterly earnings and 10-K filings","functional":[{"match":"infosys|company|entity","hard":true},{"match":"filing|10-k|earnings|quarter"}],"gap":false},
+ {"id":"fresh-news","query":"latest RBI repo rate decision this week","functional":[{"match":"fresh|recent|week|latest|date","hard":true},{"match":"rbi|repo"}],"gap":false},
+ {"id":"vague-gift","query":"a gift for my sister","functional":[{"match":"gift|sister|recipient"}],"gap":true},
+ {"id":"vague-laptop","query":"best laptop","functional":[{"match":"laptop"}],"gap":true},
+ {"id":"vague-trip","query":"plan a weekend trip","functional":[{"match":"weekend|trip|travel"}],"gap":true},
+ {"id":"kids-age","query":"educational toys for a 4 year old under 1500 rupees","functional":[{"match":"age|4|year","hard":true},{"match":"price|budget|1500","hard":true}],"gap":false},
+ {"id":"rating","query":"hotels in Jaipur rated above 4.5 with pool","functional":[{"match":"rating|4\\.5","hard":true},{"match":"pool","hard":true},{"match":"jaipur|location","hard":true}],"gap":false},
+ {"id":"similar","query":"startups similar to Linear for project tracking","functional":[{"match":"similar|linear|project"}],"gap":false},
+ {"id":"howto","query":"how to descale a Breville espresso machine","functional":[{"match":"breville|model|machine"},{"match":"descal"}],"gap":false},
+ {"id":"language","query":"Hindi podcasts about personal finance","functional":[{"match":"hindi|language","hard":true},{"match":"finance"}],"gap":false},
+ {"id":"condition","query":"refurbished iPhone 13 with at least 85% battery health","functional":[{"match":"refurb|condition","hard":true},{"match":"battery|85","hard":true}],"gap":false},
+ {"id":"availability","query":"PS5 in stock in Mumbai stores today","functional":[{"match":"stock|availab","hard":true},{"match":"mumbai|location","hard":true}],"gap":false},
+ {"id":"psych-supplied","query":"mattress for back pain","agent_understanding":{"source":"user_agent","deliberation_style":"concise","psychological_parameters":[{"key":"risk_aversion","value":"high","confidence":0.8,"evidence":[{"source":"caller","reference":"agent profile"}]}]},"functional":[{"match":"back|firm|support"}],"psych_expected":["risk"],"gap":false},
+ {"id":"psych-supplied-2","query":"weekend getaway from Delhi","agent_understanding":{"source":"user_agent","deliberation_style":"balanced","psychological_parameters":[{"key":"novelty_seeking","value":"high","confidence":0.7,"evidence":[{"source":"caller","reference":"agent profile"}]}]},"functional":[{"match":"delhi|distance|location"}],"psych_expected":["novel"],"gap":false},
+ {"id":"no-invent-luxury","query":"luxury watch for my anniversary","functional":[{"match":"watch"},{"match":"luxury|price|premium"}],"gap":true},
+ {"id":"no-invent-anxious","query":"urgent: cheapest same-day plumber in Hyderabad","functional":[{"match":"same.?day|urgent|time","hard":true},{"match":"hyderabad|location","hard":true},{"match":"cheap|price"}],"gap":false}
+]
+;
