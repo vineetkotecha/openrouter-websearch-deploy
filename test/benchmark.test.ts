@@ -12,3 +12,6 @@ describe("live benchmark runner", () => {
     expect(b.rows.every(r => r.status === "complete" || r.status === "needs_input")).toBe(true);
   });
 });
+import { ROUTING_CASES } from "../src/eval/routing-cases.js";
+import { readFileSync } from "node:fs";
+it("embedded cases match eval/routing-cases.json", () => { expect(JSON.parse(JSON.stringify(ROUTING_CASES))).toEqual(JSON.parse(readFileSync("eval/routing-cases.json", "utf8"))); });

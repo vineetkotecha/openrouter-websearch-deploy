@@ -12,8 +12,8 @@ const mean = (xs: number[]) => xs.length ? +(xs.reduce((a, b) => a + b, 0) / xs.
 
 export async function runBenchmark(h: SearchHarness, tenant_id: string, o: { path?: string; concurrency?: number; only?: string[] } = {}) {
   const tries = [o.path, "eval/routing-cases.json", fileURLToPath(new URL("../../eval/routing-cases.json", import.meta.url))].filter(Boolean) as string[];
-  const path = tries.find(p => existsSync(p)); if (!path) throw new Error("routing-cases.json not found");
-  const spec = JSON.parse(readFileSync(path, "utf8")) as { cases: Case[] };
+  const path = tries.find(p => existsSync(p));
+  const spec = (path ? JSON.parse(readFileSync(path, "utf8")) : (await import("./routing-cases.js")).ROUTING_CASES) as unknown as { cases: Case[] };
   const cases = spec.cases.filter(c => !o.only?.length || o.only.includes(c.id));
   const rows: BenchRow[] = [];
   const one = async (c: Case) => {
