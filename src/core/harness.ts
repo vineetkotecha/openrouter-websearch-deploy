@@ -21,6 +21,7 @@ export class SearchHarness {
   readonly health: ProviderHealth;
   ask?: AskFn;
   get mandateWriter(): MandateWriter { return this.writer; }
+  get providerList(): SearchProvider[] { return this.providers; }
   constructor(private c: Config, private writer: MandateWriter, private providers: SearchProvider[], private store: EpisodeStore, private opts: HarnessOptions = {}) {
     this.health = opts.health ?? new ProviderHealth();
   }
