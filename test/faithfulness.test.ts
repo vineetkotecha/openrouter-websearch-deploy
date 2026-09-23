@@ -36,3 +36,6 @@ describe("grounded answers", () => {
     expect(out.every(x => x.faithfulness.state === "unverified")).toBe(true);
   });
 });
+
+import{extractSurvivors as _xs}from"../src/core/verify.js";
+describe("extract deadline",()=>{it("gives up on a slow page and keeps the snippet",async()=>{const slow:any=(_u:string,i:any)=>new Promise((_,rej)=>i.signal.addEventListener("abort",()=>rej(new Error("aborted"))));const t=Date.now();const r=await _xs([{provider:"exa",url:"https://sec.example.com/10k",title:"10-K",snippet:"s"}],undefined,{fetcher:slow,timeoutMs:200});expect(Date.now()-t).toBeLessThan(1500);expect(r.results[0]!.snippet).toBe("s");expect(r.report.extracted).toBe(0)})});

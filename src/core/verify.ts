@@ -3,7 +3,7 @@ import { gradeDeterministic, gradeWithLlm, type LlmJudge } from "./faithfulness.
 
 const privateHost = /^(localhost|127\.|10\.|192\.168\.|169\.254\.|0\.|\[::1\])/;
 
-export type ExtractOptions = { max?: number; maxChars?: number; tokenBudget?: number; fetcher?: typeof fetch; judge?: LlmJudge };
+export type ExtractOptions = { max?: number; maxChars?: number; tokenBudget?: number; fetcher?: typeof fetch; judge?: LlmJudge; timeoutMs?: number };
 export type ExtractReport = { attempted: number; extracted: number; chars: number; tokens_est: number; skipped_budget: number };
 
 // Extract only the survivors of discovery triage, within an extract cap and a token budget.
@@ -17,11 +17,13 @@ export async function extractSurvivors(input: ProviderResult[], signal?: AbortSi
       const u = new URL(x.url);
       if (!["http:", "https:"].includes(u.protocol) || privateHost.test(u.hostname)) return x;
       report.attempted++;
-      const r = await f(`https://r.jina.ai/${x.url}`, { headers: { Accept: "text/plain" }, signal });
+      const per = AbortSignal.timeout(o.timeoutMs ?? 4000);
+      const sig = signal ? AbortSignal.any([signal, per]) : per;
+      const r = await f(`https://r.jina.ai/${x.url}`, { headers: { Accept: "text/plain" }, signal: sig });
       if (!r.ok) return x;
       const remaining = budgetChars - report.chars;
       if (remaining <= 0) { report.skipped_budget++; return x; }
-      const body = (await r.text()).slice(0, Math.min(maxChars, remaining));
+      const body = (await Promise.race([r.text(), new Promise<string>((_, rej) => sig.addEventListener("abort", () => rej(new Error("extract timeout")), { once: true }))])).slice(0, Math.min(maxChars, remaining));
       report.chars += body.length; report.extracted++;
       const fa = o.judge ? await gradeWithLlm(x, body, o.judge) : gradeDeterministic(x, body);
       const support = fa.score;
