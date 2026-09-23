@@ -143,7 +143,12 @@ export class ProviderHealth {
   private errors = new Map<string, number[]>();
   private calls = new Map<string, { day: string; n: number }>();
   constructor(private windowMs = 10 * 60_000, private now = () => Date.now()) {}
-  record(name: string, ok: boolean) {
+  private authFail = new Map<string, number>();
+  // A 401/403 means the key is rejected, not a passing error: keep the provider out for an hour.
+  authRejected(name: string) { const t = this.authFail.get(name); return t !== undefined && this.now() - t < 60 * 60_000; }
+  record(name: string, ok: boolean, status?: string) {
+    if (!ok && status && /\b(401|403)\b/.test(status)) this.authFail.set(name, this.now());
+    if (ok) this.authFail.delete(name);
     const day = new Date(this.now()).toISOString().slice(0, 10);
     const c = this.calls.get(name);
     this.calls.set(name, c && c.day === day ? { day, n: c.n + 1 } : { day, n: 1 });
@@ -198,6 +203,7 @@ export function scoreCandidates(kind: JobKind, c: Classification, r: SearchReque
     else if (allow.size && !allow.has(name)) excluded = "policy: not in provider_allowlist";
     else if (blocked.has(name)) excluded = "policy: excluded by hard constraint";
     else if (!health.quotaLeft(name)) excluded = "quota exhausted";
+    else if (health.authRejected(name)) excluded = "key rejected (401/403) in the last hour";
     else if (!cap.kinds.includes(kind)) excluded = `no ${kind} capability`;
     else if (fit === 0) excluded = `no fit for ${c.query_class}`;
     out.push({ provider: name, score, terms, excluded });
@@ -301,7 +307,7 @@ export async function executePlan(plan: JobPlan, providers: SearchProvider[], ca
     const p = name ? byName.get(name) : undefined;
     if (!p) return [] as ProviderResult[];
     const r = await call(p, job);
-    health.record(p.name, r.status === "ok");
+    health.record(p.name, r.status === "ok", r.status);
     runs.push({ job: job.id, provider: p.name, role, latency_ms: r.latency_ms, status: r.status, result_count: r.results.length });
     return r.results;
   };
@@ -315,7 +321,7 @@ export async function executePlan(plan: JobPlan, providers: SearchProvider[], ca
       const lastRun = runs.filter(r => r.job === job.id).at(-1);
       if (res.length === 0 && lastRun && lastRun.status !== "ok") {
         const tried = new Set(runs.filter(r => r.job === job.id).map(r => r.provider));
-        const next = job.candidates.find(c => !c.excluded && !tried.has(c.provider) && byName.get(c.provider)?.enabled() && health.quotaLeft(c.provider) && health.recentErrors(c.provider) < 1);
+        const next = job.candidates.find(c => !c.excluded && !tried.has(c.provider) && byName.get(c.provider)?.enabled() && health.quotaLeft(c.provider) && !health.authRejected(c.provider) && health.recentErrors(c.provider) < 1);
         if (next) { fallback_used.push(`${job.id}:${next.provider}`); res = [...res, ...(await runOne(job, next.provider, "fallback"))]; }
       }
     }

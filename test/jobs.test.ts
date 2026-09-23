@@ -155,3 +155,16 @@ describe("structured fill through the harness", () => {
     }
   });
 });
+
+describe("rejected keys", () => {
+  it("excludes a provider for an hour after a 401/403 and restores it on success", async () => {
+    let t = 0; const h = new ProviderHealth(10 * 60_000, () => t);
+    h.record("serper", false, "serper HTTP 403");
+    const r = req("running shoes buy", { provider_allowlist: ["serper", "serpapi"] });
+    const c = classifyMandate(r, await writer.write(r));
+    const s = scoreCandidates("discovery", c, r, [fake("serper", () => [], []), fake("serpapi", () => [], [])], h);
+    expect(s.find(x => x.provider === "serper")?.excluded).toMatch(/key rejected/);
+    t = 61 * 60_000; expect(h.authRejected("serper")).toBe(false);
+    h.record("tavily", false, "tavily HTTP 500"); expect(h.authRejected("tavily")).toBe(false);
+  });
+});
