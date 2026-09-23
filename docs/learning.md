@@ -16,4 +16,7 @@ No learned policy is serving. Everything here is offline or shadow-only.
   Logged-candidate replay only; no causal claims.
 - **Shadow policy** (`src/learning/shadow.ts`): UCB1 provider scorer per query class. It
   proposes; it cannot serve. Table `shadow_decisions` (migration 0005) stores proposals.
-  Not yet wired into the live request path.
+  Wired into the request path: after each stored episode with `permissions.may_learn`, the
+  tenant-local policy (refit every 15 min from that tenant's may_learn episodes) logs a proposal
+  next to the production primary. Never served. Admins read recent proposals and the agreement
+  rate at `GET /v1/admin/shadow`.

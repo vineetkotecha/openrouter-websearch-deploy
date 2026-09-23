@@ -49,3 +49,15 @@ describe("offline replay and shadow", () => {
     expect(d.production_primary).toBe("exa");
   });
 });
+
+import { shadowInputs as _si, BanditShadow as _BS } from "../src/learning/shadow.js";
+import { describe as _d, it as _i, expect as _e } from "vitest";
+_d("shadow policy inputs from the served plan", () => {
+  _i("uses only non-excluded providers and the production primary", () => {
+    const resp = { plan: { query_class: "keyword_web", jobs: [{ primary: "serpapi", candidates: [{ provider: "serpapi" }, { provider: "exa" }, { provider: "brave", excluded: "disabled" }] }] } };
+    _e(_si(resp)).toEqual({ query_class: "keyword_web", candidates: ["serpapi", "exa"], production_primary: "serpapi" });
+    _e(_si({})).toBeNull();
+    const d = new _BS().propose("keyword_web", ["serpapi", "exa"], "serpapi");
+    _e(d.production_primary).toBe("serpapi"); _e(["serpapi", "exa"]).toContain(d.proposed_primary);
+  });
+});

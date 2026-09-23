@@ -27,3 +27,13 @@ export class BanditShadow {
     return { policy: this.name, query_class, proposed_primary, production_primary, scores: Object.fromEntries(Object.entries(scores).map(([k, v]) => [k, Number.isFinite(v) ? v : 999])) };
   }
 }
+
+// Candidates and production choice for the shadow policy, taken from the served plan.
+// Only provider names and the query class are used; query text and results are not.
+export function shadowInputs(response: any): { query_class: string; candidates: string[]; production_primary?: string } | null {
+  const job = response?.plan?.jobs?.[0];
+  if (!job || !response?.plan?.query_class) return null;
+  const candidates = (job.candidates ?? []).filter((c: any) => !c.excluded).map((c: any) => c.provider);
+  if (!candidates.length) return null;
+  return { query_class: response.plan.query_class, candidates, production_primary: job.primary };
+}
