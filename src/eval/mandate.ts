@@ -18,7 +18,7 @@ const text = (f: any) => `${f.key} ${f.description} ${typeof f.value === "string
 export async function evalMandates(writer: MandateWriter, cases: MandateCase[]) {
   const rows: MandateEvalRow[] = [];
   const written: any[] = [];
-  for (let i = 0; i < cases.length; i += 8) written.push(...await Promise.all(cases.slice(i, i + 8).map(c => writer.write(SearchRequestSchema.parse({ query: c.query, tenant_id: "eval", agent_understanding: c.agent_understanding })))));
+  for (let i = 0; i < cases.length; i += 8) written.push(...await Promise.all(cases.slice(i, i + 8).map(c => writer.write(SearchRequestSchema.parse({ query: c.query, tenant_id: "eval", agent_understanding: c.agent_understanding })).catch(e => ({ factors: [], gaps: [], error: String(e?.message ?? e).slice(0, 200) })))));
   for (const [ci, c] of cases.entries()) {
     const m: any = written[ci];
     const fn = m.factors.filter((f: any) => f.class === "functional" && !DEFAULT_KEYS.has(f.key)), ps = m.factors.filter((f: any) => f.class === "psychological");
@@ -32,7 +32,7 @@ export async function evalMandates(writer: MandateWriter, cases: MandateCase[]) 
     const invented = supplied ? 0 : ps.length;
     const psychRecall = c.psych_expected?.length ? c.psych_expected.filter(k => ps.some((f: any) => new RegExp(k, "i").test(text(f)))).length / c.psych_expected.length : 1;
     const gapRaised = m.gaps.some((g: any) => g.material && g.question);
-    rows.push({ id: c.id, functional_recall: hit / c.functional.length, hard_precision: hardWanted ? hardHit / hardWanted : 1, invented_psych: invented, psych_recall: psychRecall, gap_ok: gapRaised === c.gap, missing });
+    rows.push({ ...(m.error ? { error: m.error } : {}), id: c.id, functional_recall: hit / c.functional.length, hard_precision: hardWanted ? hardHit / hardWanted : 1, invented_psych: invented, psych_recall: psychRecall, gap_ok: gapRaised === c.gap, missing });
   }
   const avg = (k: keyof MandateEvalRow) => +(rows.reduce((a, r) => a + Number(r[k]), 0) / rows.length).toFixed(3);
   return { n: rows.length, functional_recall: avg("functional_recall"), hard_constraint_rate: avg("hard_precision"), psych_recall: avg("psych_recall"), invented_psych_cases: rows.filter(r => r.invented_psych > 0).length, gap_accuracy: +(rows.filter(r => r.gap_ok).length / rows.length).toFixed(3), rows };
