@@ -295,6 +295,14 @@ export async function executePlan(plan: JobPlan, providers: SearchProvider[], ca
     if ((res.length === 0 || grade(res) < lowGrade) && job.fallback && plan.budget.max_providers_per_job > 1) {
       fallback_used.push(`${job.id}:${job.fallback}`);
       res = [...res, ...(await runOne(job, job.fallback, "fallback"))];
+      // A provider that errored (bad key, 4xx, timeout) spent no useful budget: try the next
+      // live candidate once so an auth failure never leaves the user with zero results.
+      const lastRun = runs.filter(r => r.job === job.id).at(-1);
+      if (res.length === 0 && lastRun && lastRun.status !== "ok") {
+        const tried = new Set(runs.filter(r => r.job === job.id).map(r => r.provider));
+        const next = job.candidates.find(c => !c.excluded && !tried.has(c.provider) && byName.get(c.provider)?.enabled() && health.quotaLeft(c.provider) && health.recentErrors(c.provider) < 1);
+        if (next) { fallback_used.push(`${job.id}:${next.provider}`); res = [...res, ...(await runOne(job, next.provider, "fallback"))]; }
+      }
     }
     return res;
   };

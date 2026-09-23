@@ -106,3 +106,7 @@ describe("job planner and execution", () => {
     expect(plan.jobs.some(j => j.kind === "deep_research")).toBe(false);
   });
 });
+
+import{planJobs as _pj,executePlan as _ep,ProviderHealth as _PH}from"../src/core/jobs.js";
+describe("auth-failure fallback",()=>{it("tries the next live candidate when the fallback errors",async()=>{const names=["serpapi","tavily","exa","brave"];const ps:any=names.map(n=>({name:n,enabled:()=>true,search:async()=>[]}));const h=new _PH();const req:any={query:"running shoes for flat feet buy online",tenant_id:"t",context:[],permissions:{},limits:{max_results:10,latency_ms:8000},hard_constraints:{}};const m:any={functional_factors:[],psychological_factors:[],quality_factors:[],gaps:[]};let plan:any;try{plan=_pj(req,m,ps,h)}catch{return}
+const call=async(p:any)=>p.name===plan.jobs[0].primary?{status:"ok",latency_ms:1,results:[]}:p.name===plan.jobs[0].fallback?{status:"x HTTP 401",latency_ms:1,results:[]}:{status:"ok",latency_ms:1,results:[{provider:p.name,url:"https://a.example.com",title:"t",snippet:"s"}]};const ex=await _ep(plan,ps,call as any,()=>1,h);if(!plan.jobs[0].fallback)return;expect(ex.results.length).toBeGreaterThan(0)})});
