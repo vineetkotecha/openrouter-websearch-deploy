@@ -6,6 +6,7 @@ import type { SearchProvider } from "../providers/base.js";
 import { rank } from "./rank.js";
 import { extractSurvivors } from "./verify.js";
 import { fillSummary } from "./fill.js";
+import { heuristicGaps, openGaps, contextRequest, contextUsed, type ContextRequest } from "./context-pull.js";
 import type { LlmJudge } from "./faithfulness.js";
 import { routeWithPolicy } from "./jev-router.js";
 import { executePlan, planJobs, ProviderHealth, type PlannedJob } from "./jobs.js";
@@ -27,10 +28,15 @@ export class SearchHarness {
     this.health = opts.health ?? new ProviderHealth();
   }
 
-  async search(request: SearchRequest, meta?: { principal?: unknown; surface?: string }): Promise<SearchResponse | NeedsInput> {
+  async search(request: SearchRequest, meta?: { principal?: unknown; surface?: string }): Promise<SearchResponse | NeedsInput | ContextRequest> {
     const startedAt = Date.now(), episode_id = randomUUID();
     const mandate = await this.writer.write(request);
+    // Writers that return no gaps (heuristic) still get the query-level gap checks.
+    if (!mandate.gaps.length) mandate.gaps = heuristicGaps(request);
+    mandate.gaps = openGaps(mandate, request);
     const gap = mandate.gaps.find(g => g.material);
+    // Pull from the calling agent first; ask the human only if the caller cannot pull.
+    if (gap && request.permissions.may_pull_context) return contextRequest(episode_id, gap, request);
     if (gap?.question && request.permissions.may_ask_user && this.ask) {
       const pending = await this.ask({ episode_id, request, question: gap.question, gap: gap.key, principal: meta?.principal }).catch(() => null);
       if (pending) return { status: "needs_input", episode_id, question: gap.question, gap: gap.key, resume_token: pending.resume_token, expires_in: 86400 };
@@ -92,7 +98,7 @@ export class SearchHarness {
         version: 1, query_class: plan.classification.query_class, ladder: plan.classification.ladder, signals: plan.classification.signals,
         budget: plan.budget, jobs: plan.jobs.map(j => ({ id: j.id, kind: j.kind, primary: j.primary, fallback: j.fallback, reason: j.reason, candidates: j.candidates })),
         runs: exec.runs, fallback_used: exec.fallback_used, escalated: exec.escalated, skipped: exec.skipped,
-        known_urls: plan.classification.known_urls, extraction: report, fill: plan.classification.structured_fields.length ? fillSummary(plan.classification.structured_fields, extracted.map(x => (x as any).fields)) : undefined, notes: plan.notes,
+        known_urls: plan.classification.known_urls, extraction: report, context: contextUsed(request), gaps: mandate.gaps.map(g => ({ key: g.key, material: g.material })), fill: plan.classification.structured_fields.length ? fillSummary(plan.classification.structured_fields, extracted.map(x => (x as any).fields)) : undefined, notes: plan.notes,
       },
     };
     await this.store.save({ id: episode_id, tenantId: request.tenant_id, request, response, mandate, principal: meta?.principal, surface: meta?.surface, startedAt, expiresAt: new Date(Date.now() + 30 * 864e5) });

@@ -1,0 +1,33 @@
+import { describe, it, expect } from "vitest";
+import { SearchHarness, MemoryStore } from "../src/core/harness.js";
+import { HeuristicMandateWriter } from "../src/core/mandate.js";
+import { SearchRequestSchema } from "../src/contracts/search.js";
+import { heuristicGaps } from "../src/core/context-pull.js";
+const writer = new HeuristicMandateWriter();
+const fake = { name: "exa", enabled: () => true, search: async () => [{ provider: "exa", url: "https://a.example.com/1", title: "pizza place", snippet: "pizza" }] };
+const okFetch: any = async () => ({ ok: false, text: async () => "" });
+const h = () => new SearchHarness({ SEARCH_TIMEOUT_MS: 1000 } as any, writer, [fake as any], new MemoryStore(), { fetcher: okFetch });
+const req = (x: any) => SearchRequestSchema.parse({ tenant_id: "t", ...x });
+describe("calling-agent context pull", () => {
+  it("finds a material location gap only for near-me searches without location", () => {
+    expect(heuristicGaps(req({ query: "pizza near me" })).find(g => g.key === "location")?.material).toBe(true);
+    expect(heuristicGaps(req({ query: "pizza near me", country: "IN" })).some(g => g.key === "location")).toBe(false);
+    expect(heuristicGaps(req({ query: "history of pizza" }))).toEqual([]);
+    expect(heuristicGaps(req({ query: "buy running shoes" })).find(g => g.key === "budget")?.material).toBe(false);
+  });
+  it("asks the calling agent for context, with scope and how to answer", async () => {
+    const out: any = await h().search(req({ query: "pizza near me", permissions: { may_pull_context: true, scopes: ["location:city"] } }));
+    expect(out.status).toBe("needs_input"); expect(out.kind).toBe("context_request");
+    expect(out.requested_context[0]).toMatchObject({ key: "location", scope: ["location:city"] }); expect(out.how_to_answer).toMatch(/context/);
+  });
+  it("searches once the caller supplies the key, and shows which context shaped it", async () => {
+    const out: any = await h().search(req({ query: "pizza near me", permissions: { may_pull_context: true }, context: [{ key: "location", value: "Koramangala, Bengaluru", source: "caller", confidence: .9 }] }));
+    expect(out.status).toBe("complete");
+    expect(out.plan.context.items).toEqual([{ key: "location", source: "caller", confidence: .9 }]);
+    expect(JSON.stringify(out.plan.context)).not.toContain("Koramangala");
+  });
+  it("never pulls without permission; the gap is reported as a limitation instead", async () => {
+    const out: any = await h().search(req({ query: "pizza near me" }));
+    expect(out.status).toBe("complete"); expect(out.limitations.join(" ")).toMatch(/Missing context: location/);
+  });
+});
