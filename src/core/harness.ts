@@ -13,17 +13,25 @@ export interface EpisodeStore { save(x: { id: string; tenantId: string; request:
 export class MemoryStore implements EpisodeStore { episodes = new Map<string, unknown>(); async save(x: any) { this.episodes.set(x.id, x) } async outcome(x: unknown) { this.episodes.set(randomUUID(), x) } }
 
 export type HarnessOptions = { fetcher?: typeof fetch; health?: ProviderHealth; judge?: LlmJudge };
+// One clarifying question, asked only when the caller allows it and a pending store is wired.
+export type AskFn = (x: { episode_id: string; request: SearchRequest; question: string; gap: string; principal?: unknown }) => Promise<{ resume_token: string } | null>;
+export type NeedsInput = { status: "needs_input"; episode_id: string; question: string; gap: string; resume_token: string; expires_in: number };
 
 export class SearchHarness {
   readonly health: ProviderHealth;
+  ask?: AskFn;
   constructor(private c: Config, private writer: MandateWriter, private providers: SearchProvider[], private store: EpisodeStore, private opts: HarnessOptions = {}) {
     this.health = opts.health ?? new ProviderHealth();
   }
 
-  async search(request: SearchRequest, meta?: { principal?: unknown; surface?: string }): Promise<SearchResponse> {
+  async search(request: SearchRequest, meta?: { principal?: unknown; surface?: string }): Promise<SearchResponse | NeedsInput> {
     const startedAt = Date.now(), episode_id = randomUUID();
     const mandate = await this.writer.write(request);
     const gap = mandate.gaps.find(g => g.material);
+    if (gap?.question && request.permissions.may_ask_user && this.ask) {
+      const pending = await this.ask({ episode_id, request, question: gap.question, gap: gap.key, principal: meta?.principal }).catch(() => null);
+      if (pending) return { status: "needs_input", episode_id, question: gap.question, gap: gap.key, resume_token: pending.resume_token, expires_in: 86400 };
+    }
     // Jev (when configured) nominates the first discovery provider; the job planner keeps
     // hard fails, budgets and fallback deterministic.
     const decision = await routeWithPolicy(request, mandate, this.providers);
