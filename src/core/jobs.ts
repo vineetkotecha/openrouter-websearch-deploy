@@ -104,7 +104,7 @@ export function classifyMandate(r: SearchRequest, m: Mandate): Classification {
   const structured_fields = asList(factorValue(r, m, "fields", "structured_fields", "schema_fields"));
   const freshRaw = factorValue(r, m, "freshness", "recency", "published_after");
   const freshness_need = freshRaw != null || /\b(latest|today|this week|this month|breaking|news|current|changed|announce)/.test(text) ? 1 : 0.3;
-  const synthesis_requested = factorValue(r, m, "synthesis", "deep_research") === true || /\b(deep research|literature review|synthes|comprehensive report|investigate)/.test(text);
+  const synthesis_requested = factorValue(r, m, "synthesis", "deep_research") === true || /\b(deep[- ]research|deep dive|literature review|synthes\w*|(comprehensive|in-depth|detailed) (research )?report|research report|investigat\w*|state of the art|compare and summari[sz]e)/.test(text);
   const structure_need = structured_fields.length ? 1 : /\b(fill|table of|fields?|json|spec sheet|compare .* (price|rating))/.test(text) ? .7 : .2;
   let q: QueryClass;
   const has = (re: RegExp, sig: string) => { if (re.test(text)) { signals.push(sig); return true; } return false; };
@@ -149,6 +149,9 @@ export class ProviderHealth {
     this.calls.set(name, c && c.day === day ? { day, n: c.n + 1 } : { day, n: 1 });
     if (!ok) this.errors.set(name, [...(this.errors.get(name) ?? []), this.now()]);
   }
+  private deep = { day: "", n: 0 };
+  recordDeepResearch() { const day = new Date(this.now()).toISOString().slice(0, 10); this.deep = this.deep.day === day ? { day, n: this.deep.n + 1 } : { day, n: 1 }; }
+  deepResearchToday() { const day = new Date(this.now()).toISOString().slice(0, 10); return this.deep.day === day ? this.deep.n : 0; }
   recentErrors(name: string) {
     const cut = this.now() - this.windowMs;
     const xs = (this.errors.get(name) ?? []).filter(t => t >= cut);
@@ -249,22 +252,34 @@ export function planJobs(r: SearchRequest, m: Mandate, providers: SearchProvider
       break;
     }
     case "F": {
-      // Deep research is the last resort: run the cheaper discovery ladder first, and only
-      // escalate once, when synthesis is requested and the budget allows.
+      // Deep research is the last resort: run the cheaper discovery ladder first.
       jobs.push(pickJob("discovery", "discovery", { ...c, query_class: "semantic_discovery" }, r, providers, health, "Ladder F: cheaper discovery first; deep research only on escalation.", preferredDiscovery));
-      if (budget.allow_deep_research) {
-        const d = pickJob("deep_research", "deep_research", c, r, providers, health, "Ladder F escalation: one deep-research call if discovery fails mandate fit.");
-        if (d.primary) jobs.push(d); else notes.push("Ladder F: no deep-research provider live.");
-      } else notes.push("Deep research not permitted for this search.");
       break;
     }
     default:
       jobs.push(pickJob("discovery", "discovery", c, r, providers, health, c.ladder === "B" ? "Ladder B: shopping/local SERP supply." : "Ladder A: discover, triage, extract survivors.", preferredDiscovery));
   }
+  // Deep-research gate (playbook cost gate 5, ladder F): on any ladder, a deep-research job is
+  // planned only when the mandate asks for synthesis (or the caller explicitly opts in), the
+  // daily deep-research cap is not spent, and a provider is live. It still runs only if every
+  // cheaper job leaves mandate fit weak, and at most once per search.
+  const gate = deepResearchGate(c, budget, health);
+  if (gate.open) {
+    const d = pickJob("deep_research", "deep_research", { ...c, query_class: "deep_research" }, r, providers, health, "Deep research: one call, only if cheaper jobs fail mandate fit.");
+    if (d.primary) { jobs.push(d); notes.push(`Deep research gate open (${gate.reason}).`); }
+    else notes.push("Deep research gate open but no deep-research provider live.");
+  } else notes.push(`Deep research gate closed (${gate.reason}).`);
   if (c.signals.includes("structure_overlay")) notes.push("Structure requested: survivors are extracted for field fill.");
   const capped = jobs.slice(0, budget.max_jobs);
   if (capped.length < jobs.length) notes.push(`Job cap ${budget.max_jobs} applied.`);
   return { version: 1, classification: c, budget, jobs: capped, notes };
+}
+
+export const DEEP_RESEARCH_DAILY_CAP = () => { const n = Number(process.env.DEEP_RESEARCH_PER_DAY ?? "20"); return Number.isFinite(n) && n >= 0 ? n : 20; };
+export function deepResearchGate(c: Classification, budget: Budget, health: ProviderHealth): { open: boolean; reason: string } {
+  if (!budget.allow_deep_research) return { open: false, reason: c.synthesis_requested ? "caller disallowed" : "no synthesis requested" };
+  if (health.deepResearchToday() >= DEEP_RESEARCH_DAILY_CAP()) return { open: false, reason: `daily cap ${DEEP_RESEARCH_DAILY_CAP()} reached` };
+  return { open: true, reason: c.synthesis_requested ? "synthesis requested" : "caller opted in" };
 }
 
 export type JobRun = { job: string; provider: string; role: "primary" | "fallback" | "escalation"; latency_ms: number; status: string; result_count: number };
@@ -310,11 +325,15 @@ export async function executePlan(plan: JobPlan, providers: SearchProvider[], ca
   const later = plan.jobs.filter(j => escalationIds.has(j.id));
   let results = (await Promise.all(first.map(j => runJob(j, "primary")))).flat();
   let escalated = false;
+  let backupUsed = false, deepUsed = false;
   for (const job of later) {
-    if (!escalated && (results.length === 0 || grade(results) < lowGrade)) {
+    const weak = results.length === 0 || grade(results) < lowGrade;
+    const allowed = job.id === "deep_research" ? !deepUsed : !backupUsed;
+    if (weak && allowed) {
       escalated = true;
+      if (job.id === "deep_research") { deepUsed = true; health.recordDeepResearch(); } else backupUsed = true;
       results = [...results, ...(await runJob(job, "escalation"))];
-    } else skipped.push(`${job.id}: earlier jobs met mandate fit or one escalation already used`);
+    } else skipped.push(`${job.id}: ${weak ? "escalation already used" : "earlier jobs met mandate fit"}`);
   }
   return { results, runs, fallback_used, escalated, skipped };
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { classifyMandate, planJobs, executePlan, ProviderHealth, scoreCandidates } from "../src/core/jobs.js";
+import { classifyMandate, planJobs, executePlan, ProviderHealth, scoreCandidates, deepResearchGate } from "../src/core/jobs.js";
 import { SearchHarness, MemoryStore } from "../src/core/harness.js";
 import { HeuristicMandateWriter } from "../src/core/mandate.js";
 import { SearchRequestSchema } from "../src/contracts/search.js";
@@ -115,3 +115,29 @@ import{pickFlash,resolveGeminiModel,resetGeminiModelCache}from"../src/core/gemin
 describe("gemini model resolution",()=>{it("picks the newest stable flash model when the pinned one is gone",async()=>{expect(pickFlash(["models/gemini-3.7-flash","models/gemini-3.8-flash","models/gemini-3.8-flash-preview-09","models/gemini-3.8-pro"])).toBe("gemini-3.8-flash");resetGeminiModelCache();const f:any=async()=>({ok:true,json:async()=>({models:[{name:"models/gemini-3.7-flash",supportedGenerationMethods:["generateContent"]},{name:"models/embedding-1",supportedGenerationMethods:["embedContent"]}]})});expect(await resolveGeminiModel("k","gemini-2.5-flash",f)).toBe("gemini-3.7-flash");resetGeminiModelCache();const g:any=async()=>({ok:true,json:async()=>({models:[{name:"models/gemini-2.5-flash",supportedGenerationMethods:["generateContent"]},{name:"models/gemini-3.8-flash",supportedGenerationMethods:["generateContent"]}]})});expect(await resolveGeminiModel("k","gemini-2.5-flash",g)).toBe("gemini-3.8-flash");resetGeminiModelCache()})});
 import{withWorkingModel as _ww,resetGeminiModelCache as _rg}from"../src/core/gemini-model.js";
 describe("gemini model walk",()=>{it("walks past 403 models to one that answers",async()=>{_rg();const orig=globalThis.fetch;(globalThis as any).fetch=async()=>({ok:true,json:async()=>({models:["gemini-2.5-flash","gemini-3.8-flash","gemini-3.7-flash","gemini-3.7-flash-lite"].map(n=>({name:"models/"+n,supportedGenerationMethods:["generateContent"]}))})});try{const tried:string[]=[];const out=await _ww("k","gemini-2.5-flash",async m=>{tried.push(m);if(m!=="gemini-3.7-flash")throw new Error(m==="gemini-2.5-flash"?"[404 Not Found]":"[403 Forbidden] Your project");return "ok"});expect(out).toBe("ok");expect(tried).toEqual(["gemini-2.5-flash","gemini-3.8-flash","gemini-3.7-flash"])}finally{(globalThis as any).fetch=orig;_rg()}})});
+
+describe("deep research gate", () => {
+  const ps: any = ["exa", "serpapi", "valyu", "parallel", "perplexity"].map(n => ({ name: n, enabled: () => true, search: async () => [] }));
+  it("stays closed without a synthesis request", async () => {
+    const r = req("running shoes for flat feet"); const p = planJobs(r, await writer.write(r), ps, new ProviderHealth());
+    expect(p.jobs.some(j => j.id === "deep_research")).toBe(false);
+    expect(p.notes.join(" ")).toMatch(/gate closed \(no synthesis requested\)/);
+  });
+  it("opens on synthesis but runs only when cheaper jobs are weak", async () => {
+    const h = new ProviderHealth(); const r = req("write a comprehensive research report investigating EV battery recycling economics");
+    const p = planJobs(r, await writer.write(r), ps, h);
+    expect(p.jobs.some(j => j.id === "deep_research")).toBe(true);
+    const good: any = async (pr: any) => ({ status: "ok", latency_ms: 1, results: res(pr.name, 3) });
+    const ex = await executePlan(p, ps, good, () => .9, h);
+    expect(ex.runs.some(x => x.job === "deep_research")).toBe(false); expect(h.deepResearchToday()).toBe(0);
+    const empty: any = async () => ({ status: "ok", latency_ms: 1, results: [] });
+    const ex2 = await executePlan(p, ps, empty, () => 0, h);
+    expect(ex2.runs.some(x => x.job === "deep_research")).toBe(true); expect(h.deepResearchToday()).toBe(1);
+  });
+  it("respects the daily cap and caller opt-out", () => {
+    const h = new ProviderHealth(); process.env.DEEP_RESEARCH_PER_DAY = "1"; h.recordDeepResearch();
+    const g = deepResearchGate({ synthesis_requested: true } as any, { allow_deep_research: true } as any, h);
+    expect(g.open).toBe(false); expect(g.reason).toMatch(/daily cap/); delete process.env.DEEP_RESEARCH_PER_DAY;
+    expect(deepResearchGate({ synthesis_requested: true } as any, { allow_deep_research: false } as any, h).reason).toBe("caller disallowed");
+  });
+});
