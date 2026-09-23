@@ -17,10 +17,7 @@
     "start": "node dist/cli.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "tsc --noEmit",
-    "eval:routing": "tsx src/eval/routing.ts",
-    "benchmark": "node scripts/benchmark.mjs",
-    "learn:report": "tsx src/learning/cli.ts"
+    "lint": "tsc --noEmit"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",
