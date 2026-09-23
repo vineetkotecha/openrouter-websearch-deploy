@@ -38,13 +38,18 @@ export async function withWorkingModel<T>(key: string, pinned: string, gen: (mod
   try { return await gen(first); } catch (e) {
     if (!isModelGone(e)) throw e;
     if (Date.now() < deadUntil) throw e;
-    let last: unknown = e;
-    for (const m of await listCandidates(key, pinned)) {
-      if (m === first) continue;
-      try { const out = await gen(m); cached = m; return out; } catch (err) { last = err; if (!isModelGone(err)) throw err; }
+    // Google's retirement message names the replacement ("use models/gemini-X"); try that first.
+    const suggested = String((e as Error)?.message ?? "").match(/use models\/(gemini-\d+(?:\.\d+)?-[a-z]+(?:-[a-z]+)*)/)?.[1];
+    const order = [...new Set([...(suggested ? [suggested] : []), ...await listCandidates(key, pinned)])].filter(m => m !== first);
+    const errors: string[] = [];
+    for (const m of order) {
+      try { const out = await gen(m); cached = m; return out; } catch (err) {
+        errors.push(`${m}: ${String((err as Error)?.message ?? err).replace(/^.*?\[(\d{3}[^\]]*)\]/, "[$1]").slice(0, 140)}`);
+        if (!isModelGone(err)) throw err;
+      }
     }
     deadUntil = Date.now() + 10 * 60_000;
-    throw last;
+    throw new Error(`no callable Gemini model; pinned ${first} failed; tried ${errors.join(" | ")}`);
   }
 }
 export function currentGeminiModel() { return cached; }
