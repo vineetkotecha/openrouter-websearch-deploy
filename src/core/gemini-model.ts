@@ -16,8 +16,9 @@ export async function resolveGeminiModel(key: string, pinned: string, fetcher: t
     if (!r.ok) return pinned;
     const j: any = await r.json();
     const callable = (j.models ?? []).filter((m: any) => (m.supportedGenerationMethods ?? []).includes("generateContent")).map((m: any) => String(m.name));
-    if (callable.includes(`models/${pinned}`)) return (cached = pinned);
-    return (cached = pickFlash(callable) ?? pinned);
+    // Called after the pinned model failed, so never hand it back even if it is still listed
+    // (retired models can stay listed while rejecting new callers).
+    return (cached = pickFlash(callable.filter((n: string) => n !== `models/${pinned}`)) ?? pinned);
   } catch { return pinned; }
 }
 
