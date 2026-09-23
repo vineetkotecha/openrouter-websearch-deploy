@@ -102,7 +102,8 @@ export class SearchHarness {
         known_urls: plan.classification.known_urls, extraction: report, context: contextUsed(request), gaps: mandate.gaps.map(g => ({ key: g.key, material: g.material })), fill: plan.classification.structured_fields.length ? fillSummary(plan.classification.structured_fields, extracted.map(x => (x as any).fields)) : undefined, notes: plan.notes,
       },
     };
-    await this.store.save({ id: episode_id, tenantId: request.tenant_id, request, response, mandate, principal: meta?.principal, surface: meta?.surface, startedAt, expiresAt: new Date(Date.now() + 30 * 864e5) });
+    // Storage must never fail a search: record the failure and still return results.
+    await Promise.resolve().then(() => this.store.save({ id: episode_id, tenantId: request.tenant_id, request, response, mandate, principal: meta?.principal, surface: meta?.surface, startedAt, expiresAt: new Date(Date.now() + 30 * 864e5) })).catch(e => { console.error("episode save failed", String((e as Error)?.message ?? e).slice(0, 200)); response.limitations.push("History and usage were not recorded for this search."); });
     return response;
   }
 }
