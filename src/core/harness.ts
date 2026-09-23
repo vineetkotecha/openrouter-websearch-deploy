@@ -6,7 +6,7 @@ import type { SearchProvider } from "../providers/base.js";
 import { rank } from "./rank.js";
 import { extractSurvivors } from "./verify.js";
 import { fillSummary } from "./fill.js";
-import { heuristicGaps, openGaps, contextRequest, contextUsed, type ContextRequest } from "./context-pull.js";
+import { heuristicGaps, openGaps, contextRequest, contextUsed, localizeQuery, type ContextRequest } from "./context-pull.js";
 import type { LlmJudge } from "./faithfulness.js";
 import { routeWithPolicy } from "./jev-router.js";
 import { executePlan, planJobs, ProviderHealth, type PlannedJob } from "./jobs.js";
@@ -48,12 +48,13 @@ export class SearchHarness {
     const plan = planJobs(request, mandate, this.providers, this.health, jevPick);
     const deadline = Math.min(this.c.SEARCH_TIMEOUT_MS, request.limits.latency_ms);
 
+    const providerRequest = localizeQuery(request);
     const call = async (p: SearchProvider, job: PlannedJob) => {
       const ctl = new AbortController(), s = Date.now();
       const t = setTimeout(() => ctl.abort(), deadline);
       const req = job.id === "site_search" && plan.classification.domains.length
-        ? { ...request, hard_constraints: { ...request.hard_constraints, include_domains: plan.classification.domains } }
-        : request;
+        ? { ...providerRequest, hard_constraints: { ...providerRequest.hard_constraints, include_domains: plan.classification.domains } }
+        : providerRequest;
       try {
         const results = await Promise.race([p.search({ request: req, mandate, signal: ctl.signal }), new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`${p.name} deadline exceeded`)), deadline + 250))]);
         return { status: "ok", latency_ms: Date.now() - s, results };

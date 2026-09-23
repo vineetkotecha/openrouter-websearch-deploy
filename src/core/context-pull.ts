@@ -44,3 +44,15 @@ export function contextRequest(episode_id: string, gap: { key: string; question?
 export function contextUsed(r: SearchRequest) {
   return { scopes: r.permissions.scopes, items: r.context.map(c => ({ key: c.key, source: c.source, confidence: c.confidence, observed_at: c.observed_at })) };
 }
+
+// Provider-facing query: a pulled location replaces "near me" so providers search the right place.
+// The caller's other context stays out of the provider query.
+export function localizeQuery(r: SearchRequest): SearchRequest {
+  const item = r.context.find(c => /^(location|city|area|address)$/i.test(c.key) && typeof c.value === "string" && c.value.trim());
+  const loc = (item?.value as string | undefined) ?? (typeof r.hard_constraints.location === "string" ? r.hard_constraints.location : undefined);
+  if (!loc || r.query.toLowerCase().includes(loc.toLowerCase())) return r;
+  const near = /\b(near me|nearby|near by|around me|in my area)\b/i;
+  if (near.test(r.query)) return { ...r, query: r.query.replace(near, `in ${loc.slice(0, 120)}`) };
+  if (LOCAL.test(r.query)) return { ...r, query: `${r.query} in ${loc.slice(0, 120)}` };
+  return r;
+}

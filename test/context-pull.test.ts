@@ -31,3 +31,11 @@ describe("calling-agent context pull", () => {
     expect(out.status).toBe("complete"); expect(out.limitations.join(" ")).toMatch(/Missing context: location/);
   });
 });
+import { localizeQuery } from "../src/core/context-pull.js";
+describe("pulled location reaches providers", () => {
+  it("replaces near me with the supplied location", () => {
+    expect(localizeQuery(req({ query: "pizza near me", context: [{ key: "location", value: "Koramangala, Bengaluru", source: "caller" }] })).query).toBe("pizza in Koramangala, Bengaluru");
+    expect(localizeQuery(req({ query: "best pizza open now", context: [{ key: "city", value: "Pune", source: "human" }] })).query).toBe("best pizza open now in Pune");
+    expect(localizeQuery(req({ query: "history of pizza", context: [{ key: "location", value: "Pune", source: "caller" }] })).query).toBe("history of pizza");
+  });
+});
