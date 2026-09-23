@@ -1,9 +1,10 @@
+import { fillFields } from "./fill.js";
 import type { ProviderResult } from "../contracts/search.js";
 import { gradeDeterministic, gradeWithLlm, type LlmJudge } from "./faithfulness.js";
 
 const privateHost = /^(localhost|127\.|10\.|192\.168\.|169\.254\.|0\.|\[::1\])/;
 
-export type ExtractOptions = { max?: number; maxChars?: number; tokenBudget?: number; fetcher?: typeof fetch; judge?: LlmJudge; timeoutMs?: number };
+export type ExtractOptions = { max?: number; maxChars?: number; tokenBudget?: number; fetcher?: typeof fetch; judge?: LlmJudge; timeoutMs?: number; fields?: string[] };
 export type ExtractReport = { attempted: number; extracted: number; chars: number; tokens_est: number; skipped_budget: number };
 
 // Extract only the survivors of discovery triage, within an extract cap and a token budget.
@@ -28,7 +29,8 @@ export async function extractSurvivors(input: ProviderResult[], signal?: AbortSi
       const fa = o.judge ? await gradeWithLlm(x, body, o.judge) : gradeDeterministic(x, body);
       const support = fa.score;
       const title = x.title && x.title !== x.url ? x.title : (body.split("\n").find(l => l.trim())?.replace(/^title:\s*/i, "").slice(0, 200) ?? x.url);
-      return { ...x, title, snippet: x.snippet || body.slice(0, 400), raw: { ...(typeof x.raw === "object" && x.raw ? x.raw : {}), verified_content: true, support: Number(support.toFixed(3)), faithfulness: fa, passage: body.slice(0, 1200), retrieved_at: new Date().toISOString() } };
+      const fields = o.fields?.length ? fillFields(o.fields, body) : undefined;
+      return { ...x, ...(fields ? { fields } : {}), title, snippet: x.snippet || body.slice(0, 400), raw: { ...(typeof x.raw === "object" && x.raw ? x.raw : {}), verified_content: true, support: Number(support.toFixed(3)), faithfulness: fa, passage: body.slice(0, 1200), retrieved_at: new Date().toISOString() } };
     } catch { return x; }
   }));
   report.tokens_est = Math.ceil(report.chars / 4);

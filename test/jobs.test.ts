@@ -141,3 +141,17 @@ describe("deep research gate", () => {
     expect(deepResearchGate({ synthesis_requested: true } as any, { allow_deep_research: false } as any, h).reason).toBe("caller disallowed");
   });
 });
+
+describe("structured fill through the harness", () => {
+  it("attaches filled fields and a coverage summary when fields are requested", async () => {
+    const page = "Title: Quiet laptop\nPrice: $899\nBattery life: 14 hours\n" + "quiet laptop battery review ".repeat(50);
+    const fetcher: any = async () => ({ ok: true, text: async () => page });
+    {
+      const h = new SearchHarness({ SEARCH_TIMEOUT_MS: 1000 } as any, writer, [fake("exa", () => res("exa", 3), [])], new MemoryStore(), { fetcher });
+      const out = await h.search(req("quiet laptop battery", { hard_constraints: { fields: ["price", "battery life", "weight"] } }));
+      const top = out.results.find(r => r.fields);
+      expect(top?.fields?.price?.value).toBe("$899"); expect(top?.fields?.["battery life"]?.value).toBe("14 hours"); expect(top?.fields?.weight?.state).toBe("missing");
+      expect(out.plan?.fill?.coverage.price).toBeGreaterThan(0);
+    }
+  });
+});
