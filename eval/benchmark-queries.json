@@ -1,0 +1,18 @@
+{
+ "version": 1,
+ "providers": ["exa", "serpapi", "valyu", "jina", "firecrawl"],
+ "queries": [
+  "startups similar to Linear for project tracking",
+  "best noise cancelling headphones for flights under $300",
+  "latest news on the EU AI Act enforcement",
+  "running shoes for flat feet buy online",
+  "pharmacy near Indiranagar Bangalore open now",
+  "peer-reviewed papers on retrieval augmented generation",
+  "Infosys quarterly earnings and filings",
+  "alternatives to Notion for personal wikis",
+  "quiet mechanical keyboard for office use",
+  "how to renew an Indian passport online",
+  "open source vector databases compared",
+  "best time to visit Ladakh and permits needed"
+ ]
+}
