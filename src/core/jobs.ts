@@ -38,7 +38,7 @@ export const CAPABILITIES: Record<string, Capability> = {
   perplexity: { classes: ["grounded_answer", "deep_research", "news_fresh"], kinds: ["deep_research"], cost: .7, latency: .5, freshness: .85, structure: .3, token_load: .6 },
   gemini_deep_research: { classes: ["deep_research"], kinds: ["deep_research"], cost: 1, latency: .05, freshness: .7, structure: .3, token_load: 1 },
   linkup: { classes: ["structured_json", "semantic_discovery"], kinds: ["structured", "discovery"], cost: .4, latency: .6, freshness: .7, structure: .95, token_load: .3 },
-  parallel: { classes: ["deep_research", "grounded_answer"], kinds: ["deep_research"], cost: .8, latency: .2, freshness: .75, structure: .6, token_load: .8 },
+  parallel: { classes: ["semantic_discovery", "keyword_web", "deep_research", "grounded_answer"], kinds: ["discovery", "deep_research"], cost: .8, latency: .2, freshness: .75, structure: .6, token_load: .8 },
   you: { classes: ["keyword_web", "news_fresh", "grounded_answer"], kinds: ["discovery"], cost: .35, latency: .75, freshness: .8, structure: .3, token_load: .3 },
   apify: { classes: ["local_shopping_maps", "site_map_crawl"], kinds: ["discovery", "crawl"], cost: .5, latency: .3, freshness: .8, structure: .7, token_load: .5 },
   diffbot: { classes: ["entity_kg", "structured_json"], kinds: ["structured"], cost: .6, latency: .6, freshness: .5, structure: 1, token_load: .3 },
