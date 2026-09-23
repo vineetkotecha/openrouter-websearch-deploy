@@ -71,6 +71,7 @@ export class SearchHarness {
     const anyEnabled = this.providers.some(p => p.enabled());
     if (!anyEnabled && !known.length) limitations.push("No provider key is configured; returning an empty ranked set.");
     if (gap) limitations.push(`Missing context: ${gap.key}.`);
+    if ((mandate as any).fallback_reason) limitations.push(`Mandate writer fell back to heuristic (${(mandate as any).fallback_reason}).`);
     for (const n of plan.notes) if (/no .* provider live/i.test(n)) limitations.push(n);
     const firstJob = plan.jobs[0];
     const response: SearchResponse = {

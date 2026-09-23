@@ -32,10 +32,11 @@ export async function evalMandates(writer: MandateWriter, cases: MandateCase[]) 
     const invented = supplied ? 0 : ps.length;
     const psychRecall = c.psych_expected?.length ? c.psych_expected.filter(k => ps.some((f: any) => new RegExp(k, "i").test(text(f)))).length / c.psych_expected.length : 1;
     const gapRaised = m.gaps.some((g: any) => g.material && g.question);
-    rows.push({ ...(m.error ? { error: m.error } : {}), id: c.id, functional_recall: hit / c.functional.length, hard_precision: hardWanted ? hardHit / hardWanted : 1, invented_psych: invented, psych_recall: psychRecall, gap_ok: gapRaised === c.gap, missing });
+    rows.push({ ...(m.error ? { error: m.error } : {}), ...(m.fallback_reason ? { fallback_reason: m.fallback_reason } : {}), id: c.id, functional_recall: hit / c.functional.length, hard_precision: hardWanted ? hardHit / hardWanted : 1, invented_psych: invented, psych_recall: psychRecall, gap_ok: gapRaised === c.gap, missing });
   }
   const avg = (k: keyof MandateEvalRow) => +(rows.reduce((a, r) => a + Number(r[k]), 0) / rows.length).toFixed(3);
-  return { n: rows.length, functional_recall: avg("functional_recall"), hard_constraint_rate: avg("hard_precision"), psych_recall: avg("psych_recall"), invented_psych_cases: rows.filter(r => r.invented_psych > 0).length, gap_accuracy: +(rows.filter(r => r.gap_ok).length / rows.length).toFixed(3), rows };
+  const fallbacks = rows.map((r: any) => r.fallback_reason).filter(Boolean);
+  return { n: rows.length, writer_fallbacks: fallbacks.length, fallback_reasons: [...new Set(fallbacks)].slice(0, 5), functional_recall: avg("functional_recall"), hard_constraint_rate: avg("hard_precision"), psych_recall: avg("psych_recall"), invented_psych_cases: rows.filter(r => r.invented_psych > 0).length, gap_accuracy: +(rows.filter(r => r.gap_ok).length / rows.length).toFixed(3), rows };
 }
 
 if (process.argv[1]?.endsWith("mandate.ts") || process.argv[1]?.endsWith("mandate.js")) {
