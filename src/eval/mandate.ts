@@ -2,7 +2,7 @@
 // - functional: each labeled constraint must appear as a functional factor (and be hard when labeled hard)
 // - psychological: never invented; only present when the calling agent supplied it
 // - gap: vague queries must raise a material gap with a question; specific ones must not
-// Runs the heuristic writer offline, or the production Gemini writer when GEMINI_API_KEY is set.
+// Runs the heuristic writer offline, or the production Gemini writer when Vertex credentials or GEMINI_API_KEY are set.
 import { readFileSync } from "node:fs";
 import { SearchRequestSchema } from "../contracts/search.js";
 import { HeuristicMandateWriter, type MandateWriter } from "../core/mandate.js";
@@ -42,7 +42,7 @@ export async function evalMandates(writer: MandateWriter, cases: MandateCase[]) 
 if (process.argv[1]?.endsWith("mandate.ts") || process.argv[1]?.endsWith("mandate.js")) {
   const cases: MandateCase[] = JSON.parse(readFileSync(new URL("../../eval/mandate-cases.json", import.meta.url), "utf8"));
   let writer: MandateWriter = new HeuristicMandateWriter(), name = "heuristic";
-  if (process.env.GEMINI_API_KEY) { const { GeminiMandateWriter } = await import("../core/mandate.js") as any; const { loadConfig } = await import("../config.js"); writer = new GeminiMandateWriter(loadConfig()); name = "gemini"; }
+  if (process.env.GOOGLE_VERTEX_SA_JSON || process.env.GEMINI_API_KEY) { const { GeminiMandateWriter } = await import("../core/mandate.js") as any; const { loadConfig } = await import("../config.js"); writer = new GeminiMandateWriter(loadConfig()); name = "gemini"; }
   const r = await evalMandates(writer, cases);
   console.log(JSON.stringify({ writer: name, ...r, rows: r.rows.filter(x => x.functional_recall < 1 || !x.gap_ok || x.invented_psych) }, null, 2));
 }
