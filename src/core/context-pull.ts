@@ -15,7 +15,7 @@ const BUY = /\b(buy|purchase|shop|order|price|cheap|deal|under \$?[0-9])\b/i;
 // Heuristic gaps: only facts the query cannot answer and that change the result set.
 // Location for "near me" searches is material; budget for shopping is not (we still rank without it).
 export function heuristicGaps(r: SearchRequest): Mandate["gaps"] {
-  const has = (k: RegExp) => r.context.some(c => k.test(c.key)) || Object.keys(r.hard_constraints).some(x => k.test(x));
+  const has = (k: RegExp) => r.context.some(c => (!c.expires_at||Date.parse(c.expires_at)>Date.now())&&k.test(c.key)) || Object.keys(r.hard_constraints).some(x => k.test(x));
   const gaps: Mandate["gaps"] = [];
   if (LOCAL.test(r.query) && !r.country && !has(/^(location|city|area|lat|lng|lon|postcode|zip|address)/i))
     gaps.push({ key: "location", material: true, question: "Which city or area should I search near?" });
@@ -26,7 +26,7 @@ export function heuristicGaps(r: SearchRequest): Mandate["gaps"] {
 
 // Drop gaps the caller already answered through context or hard constraints.
 export function openGaps(m: Mandate, r: SearchRequest): Mandate["gaps"] {
-  const answered = new Set([...r.context.map(c => c.key.toLowerCase()), ...Object.keys(r.hard_constraints).map(k => k.toLowerCase())]);
+  const answered = new Set([...r.context.filter(c=>!c.expires_at||Date.parse(c.expires_at)>Date.now()).map(c => c.key.toLowerCase()), ...Object.keys(r.hard_constraints).map(k => k.toLowerCase())]);
   return m.gaps.filter(g => !answered.has(g.key.toLowerCase()));
 }
 
@@ -48,7 +48,7 @@ export function contextUsed(r: SearchRequest) {
 // Provider-facing query: a pulled location replaces "near me" so providers search the right place.
 // The caller's other context stays out of the provider query.
 export function localizeQuery(r: SearchRequest): SearchRequest {
-  const item = r.context.find(c => /^(location|city|area|address)$/i.test(c.key) && typeof c.value === "string" && c.value.trim());
+  const item = r.context.find(c => (!c.expires_at||Date.parse(c.expires_at)>Date.now()) && /^(location|city|area|address)$/i.test(c.key) && typeof c.value === "string" && c.value.trim());
   const loc = (item?.value as string | undefined) ?? (typeof r.hard_constraints.location === "string" ? r.hard_constraints.location : undefined);
   if (!loc || r.query.toLowerCase().includes(loc.toLowerCase())) return r;
   const near = /\b(near me|nearby|near by|around me|in my area)\b/i;

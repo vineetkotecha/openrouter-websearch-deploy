@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { decideFill } from "./parameter-fill.js";
+import { jevRerank } from "./jev-rerank.js";
 import type { Config } from "../config.js";
 import type { ProviderResult, SearchRequest, SearchResponse } from "../contracts/search.js";
 import type { MandateWriter } from "./mandate.js";
@@ -30,25 +32,27 @@ export class SearchHarness {
 
   async search(request: SearchRequest, meta?: { principal?: unknown; surface?: string }): Promise<SearchResponse | NeedsInput | ContextRequest> {
     const startedAt = Date.now(), episode_id = randomUUID();
-    const mandate = await this.writer.write(request);
+    const activeRequest={...request,context:request.context.filter(c=>!c.expires_at||Date.parse(c.expires_at)>Date.now())};
+    const mandate = await this.writer.write(activeRequest);
     // Writers that return no gaps (heuristic) still get the query-level gap checks.
-    if (!mandate.gaps.length) mandate.gaps = heuristicGaps(request);
-    mandate.gaps = openGaps(mandate, request);
-    const gap = mandate.gaps.find(g => g.material);
+    if (!mandate.gaps.length) mandate.gaps = heuristicGaps(activeRequest);
+    mandate.gaps = openGaps(mandate, activeRequest);
+    const fillDecision=decideFill(mandate,request);
+    const gap = fillDecision.ask.length?mandate.gaps.find(g=>g.key===fillDecision.ask[0]!.key):mandate.gaps.find(g=>g.material);
     // Pull from the calling agent first; ask the human only if the caller cannot pull.
-    if (gap && request.permissions.may_pull_context) return contextRequest(episode_id, gap, request);
+    if (fillDecision.ask.length && request.permissions.may_pull_context) { const first=mandate.gaps.find(g=>g.key===fillDecision.ask[0]!.key)!; const out=contextRequest(episode_id,first,request); out.requested_context=fillDecision.ask.map(x=>({key:x.key,why:x.reason+": "+x.question,accepted_sources:["caller","human","prior_outcome"],scope:request.permissions.scopes.length?request.permissions.scopes:["this_search"]}));out.question=fillDecision.ask.map(x=>x.question).join(" ");return out; }
     if (gap?.question && request.permissions.may_ask_user && this.ask) {
       const pending = await this.ask({ episode_id, request, question: gap.question, gap: gap.key, principal: meta?.principal }).catch(() => null);
       if (pending) return { status: "needs_input", episode_id, question: gap.question, gap: gap.key, resume_token: pending.resume_token, expires_in: 86400 };
     }
     // Jev (when configured) nominates the first discovery provider; the job planner keeps
     // hard fails, budgets and fallback deterministic.
-    const decision = await routeWithPolicy(request, mandate, this.providers);
+    const decision = await routeWithPolicy(activeRequest, mandate, this.providers);
     const jevPick = decision.policy.startsWith("jev") ? decision.selected[0]?.provider_name : undefined;
-    const plan = planJobs(request, mandate, this.providers, this.health, jevPick);
+    const plan = planJobs(activeRequest, mandate, this.providers, this.health, jevPick);
     const deadline = Math.min(this.c.SEARCH_TIMEOUT_MS, request.limits.latency_ms);
 
-    const providerRequest = localizeQuery(request);
+    const providerRequest = localizeQuery(activeRequest);
     const call = async (p: SearchProvider, job: PlannedJob) => {
       const ctl = new AbortController(), s = Date.now();
       const t = setTimeout(() => ctl.abort(), deadline);
@@ -80,12 +84,16 @@ export class SearchHarness {
     const anyEnabled = this.providers.some(p => p.enabled());
     if (!anyEnabled && !known.length) limitations.push("No provider key is configured; returning an empty ranked set.");
     if (gap) limitations.push(`Missing context: ${gap.key}.`);
+    for(const d of fillDecision.defaults) limitations.push(`Defaulted ${d.key}: ${d.reason}.`);
+    for(const k of fillDecision.stale) limitations.push(`Stale context ignored: ${k}.`);
     if ((mandate as any).fallback_reason) limitations.push(`Mandate writer fell back to heuristic (${(mandate as any).fallback_reason}).`);
     for (const n of plan.notes) if (/no .* provider live/i.test(n)) limitations.push(n);
     const firstJob = plan.jobs[0];
+    const initialRank=rank(mandate, [...extracted, ...rest], request.limits.max_results);
+    const reranked=await jevRerank(activeRequest,mandate,initialRank);
     const response: SearchResponse = {
       status: "complete", episode_id,
-      results: rank(mandate, [...extracted, ...rest], request.limits.max_results),
+      results: reranked.results,
       route: exec.runs.map(x => ({ provider: x.provider, latency_ms: x.latency_ms, status: x.status, result_count: x.result_count })),
       limitations,
       route_decision: {
@@ -99,7 +107,7 @@ export class SearchHarness {
         version: 1, query_class: plan.classification.query_class, ladder: plan.classification.ladder, signals: plan.classification.signals,
         budget: plan.budget, jobs: plan.jobs.map(j => ({ id: j.id, kind: j.kind, primary: j.primary, fallback: j.fallback, reason: j.reason, candidates: j.candidates })),
         runs: exec.runs, fallback_used: exec.fallback_used, escalated: exec.escalated, skipped: exec.skipped,
-        known_urls: plan.classification.known_urls, extraction: report, context: contextUsed(request), gaps: mandate.gaps.map(g => ({ key: g.key, material: g.material })), fill: plan.classification.structured_fields.length ? fillSummary(plan.classification.structured_fields, extracted.map(x => (x as any).fields)) : undefined, notes: plan.notes,
+        known_urls: plan.classification.known_urls, extraction: report, context: contextUsed(activeRequest), gaps: mandate.gaps.map(g => ({ key: g.key, material: g.material })), fill: plan.classification.structured_fields.length ? fillSummary(plan.classification.structured_fields, extracted.map(x => (x as any).fields)) : undefined, notes: [...plan.notes,...fillDecision.defaults.map(x=>`default:${x.key} - ${x.reason}`),`jev_rerank: ${reranked.successful}/${reranked.attempted}; tokens ${reranked.usage.input_tokens}/${reranked.usage.output_tokens}`],
       },
     };
     // Storage must never fail a search: record the failure and still return results.
