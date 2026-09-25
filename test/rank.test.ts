@@ -14,3 +14,8 @@ describe("snippet evidence discipline",()=>{it("does not present provider snippe
  const r=rank({intent:"battery patent",factors:[]} as any,[{provider:"test",url:"https://patents.example/a",title:"Battery patent",snippet:"This detailed provider snippet claims the battery patent is valid and licensed worldwide."}]);
  expect(r[0]?.faithfulness).toEqual({state:"unverified",score:.2});expect(r[0]?.reason).toContain("source support is unverified");
 })});
+
+it("keeps the human-readable support reason aligned with the graded state",()=>{
+ const r=rank({intent:"battery patent",factors:[]} as any,[{provider:"test",url:"https://patents.example/a",title:"Battery patent",snippet:"A battery patent with detailed claims",raw:{verified_content:true,faithfulness:{state:"partial",score:.72}}}]);
+ expect(r[0]?.faithfulness.state).toBe("partial");expect(r[0]?.reason).toContain("source support is partial");
+});
