@@ -23,7 +23,7 @@ export async function runBenchmark(h: SearchHarness, tenant_id: string, o: { pat
       const r: any = await h.search(req, { surface: "benchmark" });
       const top = (r.results ?? []).slice(0, 3);
       rows.push({
-        id: c.id, query_class: r.plan?.query_class ?? r.kind ?? "?", expected_class: c.expect.query_class, status: r.status, latency_ms: Date.now() - t,
+        id: c.id, query_class: r.plan?.query_class ?? r.route_decision?.task_class ?? r.kind ?? "?", expected_class: c.expect.query_class, status: r.status, latency_ms: Date.now() - t,
         results: (r.results ?? []).length, primary: r.plan?.runs?.find((x: any) => x.role === "primary" && x.status === "ok")?.provider ?? r.plan?.jobs?.[0]?.primary,
         fallback: !!r.plan?.fallback_used?.length, error: (r.plan?.runs ?? []).filter((x: any) => x.status !== "ok").map((x: any) => `${x.provider}: ${x.status}`).join("; ") || undefined,
         top3_supported: top.filter((x: any) => x.faithfulness?.state === "supported").length, top3_fit: mean(top.map((x: any) => x.mandate_fit ?? 0)),

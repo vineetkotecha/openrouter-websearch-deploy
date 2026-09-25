@@ -46,6 +46,16 @@ export class SearchHarness {
       const pending = await this.ask({ episode_id, request, question: gap.question, gap: gap.key, principal: meta?.principal }).catch(() => null);
       if (pending) return { status: "needs_input", episode_id, question: gap.question, gap: gap.key, resume_token: pending.resume_token, expires_in: 86400 };
     }
+    // A location-dependent local query without a usable location cannot be fulfilled.
+    // Returning unrelated cities as “near me” is worse than an empty, explicit result.
+    // No caller permission to pull means do not request or infer a location.
+    if (/\b(near me|nearby|near by|around me|in my area|closest|open now|local)\b/i.test(request.query) && heuristicGaps(activeRequest).some(g => g.key === "location" && g.material)) {
+      const response: SearchResponse = { status: "complete", episode_id, results: [], route: [],
+        limitations: ["Location is required to answer this local search; no location was supplied, so no providers were called."],
+        route_decision: { task_class: "local_shopping_maps", policy: "location-required", candidates: [], selected: [] } };
+      await Promise.resolve().then(() => this.store.save({ id: episode_id, tenantId: request.tenant_id, request, response, mandate, principal: meta?.principal, surface: meta?.surface, startedAt, expiresAt: new Date(Date.now() + 30 * 864e5) })).catch(() => { response.limitations.push("History and usage were not recorded for this search."); });
+      return response;
+    }
     // Jev (when configured) nominates the first discovery provider; the job planner keeps
     // hard fails, budgets and fallback deterministic.
     const decision = await routeWithPolicy(activeRequest, mandate, this.providers);

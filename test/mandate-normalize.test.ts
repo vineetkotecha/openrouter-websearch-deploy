@@ -12,3 +12,10 @@ describe('model gap preservation',()=>{it('keeps a material, specific caller que
  const x=await normalizeModelMandate({intent:'find a laptop',category:'shopping',factors:[],gaps:[{key:'use_case',material:true,question:'What will the laptop be used for?'}]},r,'v2');
  expect(x.gaps).toEqual([{key:'use_case',material:true,question:'What will the laptop be used for?'}]);
 })});
+
+describe('source-grounded factors',()=>{it('preserves explicitly supplied psychology and hard recency when the model omits them',async()=>{
+ const r=SearchRequestSchema.parse({query:'latest RBI repo rate decision this week',tenant_id:'t',agent_understanding:{source:'user_agent',psychological_parameters:[{key:'risk_aversion',value:'high',confidence:.8,evidence:[{source:'caller',reference:'agent profile'}]}]}});
+ const x=await normalizeModelMandate({intent:r.query,category:'news',factors:[],gaps:[]},r,'v2');
+ expect(x.factors.find(f=>f.key==='risk_aversion')).toMatchObject({class:'psychological',value:'high',hard:false,confidence:.8});
+ expect(x.factors.some(f=>f.class==='functional'&&f.hard&&/fresh|week|latest/.test(f.key))).toBe(true);
+})});

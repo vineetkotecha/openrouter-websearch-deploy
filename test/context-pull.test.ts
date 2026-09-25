@@ -14,7 +14,9 @@ describe("calling-agent context pull", () => {
     expect(heuristicGaps(req({ query: "best laptop" })).find(g => g.key === "use_case")?.material).toBe(true);
     expect(heuristicGaps(req({ query: "plan a weekend trip" })).find(g => g.key === "origin")?.material).toBe(true);
     expect(heuristicGaps(req({ query: "luxury watch for my anniversary" })).find(g => g.key === "recipient")?.material).toBe(true);
-    expect(heuristicGaps(req({ query: "pizza near me", country: "IN" })).some(g => g.key === "location")).toBe(false);
+    expect(heuristicGaps(req({ query: "pizza near me", country: "IN" })).some(g => g.key === "location")).toBe(true);
+    expect(heuristicGaps(req({ query: "pizza in Delhi open now" })).some(g => g.key === "location")).toBe(false);
+    expect(heuristicGaps(req({ query: "pizza near me", context:[{key:"location",value:null,source:"caller"}] })).some(g=>g.key==="location")).toBe(true);
     expect(heuristicGaps(req({ query: "history of pizza" }))).toEqual([]);
     expect(heuristicGaps(req({ query: "buy running shoes" })).find(g => g.key === "budget")?.material).toBe(false);
   });
@@ -29,9 +31,12 @@ describe("calling-agent context pull", () => {
     expect(out.plan.context.items).toEqual([{ key: "location", source: "caller", confidence: .9 }]);
     expect(JSON.stringify(out.plan.context)).not.toContain("Koramangala");
   });
-  it("never pulls without permission; the gap is reported as a limitation instead", async () => {
-    const out: any = await h().search(req({ query: "pizza near me" }));
-    expect(out.status).toBe("complete"); expect(out.limitations.join(" ")).toMatch(/Missing context: location/);
+  it("never searches an unrelated city when local location is missing and pull is forbidden", async () => {
+    let calls=0; const provider={ name:"exa", enabled:()=>true, search:async()=>{calls++;return []} };
+    const harness=new SearchHarness({ SEARCH_TIMEOUT_MS:1000 } as any,writer,[provider as any],new MemoryStore());
+    const out:any=await harness.search(req({query:"pharmacy near me open now",country:"IN"}));
+    expect(out.status).toBe("complete"); expect(out.results).toEqual([]); expect(calls).toBe(0);
+    expect(out.limitations.join(" ")).toMatch(/Location is required/);
   });
 });
 import { localizeQuery } from "../src/core/context-pull.js";
