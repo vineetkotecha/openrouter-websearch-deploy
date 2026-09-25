@@ -8,3 +8,9 @@ describe("evidence-aware ordering",()=>{it("promotes a comparably relevant suppo
  const r=rank(m,[x("https://a.test","battery patent invention"),x("https://b.test","battery patent",{state:"supported",score:.8}),x("https://c.test","unrelated blog",{state:"supported",score:.8})]);
  expect(r[0]?.url).toBe("https://b.test");expect(r[2]?.url).toBe("https://c.test");
 })});
+
+
+describe("snippet evidence discipline",()=>{it("does not present provider snippets as independently supported",()=>{
+ const r=rank({intent:"battery patent",factors:[]} as any,[{provider:"test",url:"https://patents.example/a",title:"Battery patent",snippet:"This detailed provider snippet claims the battery patent is valid and licensed worldwide."}]);
+ expect(r[0]?.faithfulness).toEqual({state:"unverified",score:.2});expect(r[0]?.reason).toContain("source support is unverified");
+})});
