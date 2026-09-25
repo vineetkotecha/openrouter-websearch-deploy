@@ -11,6 +11,9 @@ const req = (x: any) => SearchRequestSchema.parse({ tenant_id: "t", ...x });
 describe("calling-agent context pull", () => {
   it("finds a material location gap only for near-me searches without location", () => {
     expect(heuristicGaps(req({ query: "pizza near me" })).find(g => g.key === "location")?.material).toBe(true);
+    expect(heuristicGaps(req({ query: "best laptop" })).find(g => g.key === "use_case")?.material).toBe(true);
+    expect(heuristicGaps(req({ query: "plan a weekend trip" })).find(g => g.key === "origin")?.material).toBe(true);
+    expect(heuristicGaps(req({ query: "luxury watch for my anniversary" })).find(g => g.key === "recipient")?.material).toBe(true);
     expect(heuristicGaps(req({ query: "pizza near me", country: "IN" })).some(g => g.key === "location")).toBe(false);
     expect(heuristicGaps(req({ query: "history of pizza" }))).toEqual([]);
     expect(heuristicGaps(req({ query: "buy running shoes" })).find(g => g.key === "budget")?.material).toBe(false);

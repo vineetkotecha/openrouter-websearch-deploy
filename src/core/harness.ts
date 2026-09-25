@@ -35,7 +35,8 @@ export class SearchHarness {
     const activeRequest={...request,context:request.context.filter(c=>!c.expires_at||Date.parse(c.expires_at)>Date.now())};
     const mandate = await this.writer.write(activeRequest);
     // Writers that return no gaps (heuristic) still get the query-level gap checks.
-    if (!mandate.gaps.length) mandate.gaps = heuristicGaps(activeRequest);
+    // The model may omit a material query-level gap; merge deterministic checks without duplicating keys.
+    for (const g of heuristicGaps(activeRequest)) if (!mandate.gaps.some(x => x.key === g.key)) mandate.gaps.push(g);
     mandate.gaps = openGaps(mandate, activeRequest);
     const fillDecision=decideFill(mandate,request);
     const gap = fillDecision.ask.length?mandate.gaps.find(g=>g.key===fillDecision.ask[0]!.key):mandate.gaps.find(g=>g.material);

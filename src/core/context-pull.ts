@@ -17,6 +17,13 @@ const BUY = /\b(buy|purchase|shop|order|price|cheap|deal|under \$?[0-9])\b/i;
 export function heuristicGaps(r: SearchRequest): Mandate["gaps"] {
   const has = (k: RegExp) => r.context.some(c => (!c.expires_at||Date.parse(c.expires_at)>Date.now())&&k.test(c.key)) || Object.keys(r.hard_constraints).some(x => k.test(x));
   const gaps: Mandate["gaps"] = [];
+  // Broad shopping requests need the intended use before the result set is meaningful.
+  if (/\bbest laptop\b/i.test(r.query) && !has(/^(use_case|purpose|usage)/i))
+    gaps.push({ key: "use_case", material: true, question: "What will the laptop be used for?" });
+  if (/\bweekend trip\b/i.test(r.query) && !has(/^(origin|departure|location|city)/i))
+    gaps.push({ key: "origin", material: true, question: "Where would you leave from?" });
+  if (/\b(luxury )?watch for my anniversary\b/i.test(r.query) && !has(/^(recipient|wrist_size|style)/i))
+    gaps.push({ key: "recipient", material: true, question: "Who is the watch for?" });
   if (LOCAL.test(r.query) && !r.country && !has(/^(location|city|area|lat|lng|lon|postcode|zip|address)/i))
     gaps.push({ key: "location", material: true, question: "Which city or area should I search near?" });
   if (BUY.test(r.query) && !has(/^(budget|price|max_price|price_max)/i) && !/[$₹€£]\s?[0-9]|\b[0-9]+\s?(usd|inr|rs|dollars|rupees)\b/i.test(r.query))
