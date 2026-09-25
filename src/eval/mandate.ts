@@ -15,10 +15,10 @@ export type MandateEvalRow = { id: string; functional_recall: number; hard_preci
 const DEFAULT_KEYS = new Set(["query_relevance", "result_directness", "source_support", "result_specificity", "current_accessibility"]);
 const text = (f: any) => `${f.key} ${f.description} ${typeof f.value === "string" ? f.value : JSON.stringify(f.value ?? "")}`.toLowerCase();
 
-export async function evalMandates(writer: MandateWriter, cases: MandateCase[]) {
+export async function evalMandates(writer: MandateWriter, cases: MandateCase[], concurrency = 2) {
   const rows: MandateEvalRow[] = [];
   const written: any[] = [];
-  for (let i = 0; i < cases.length; i += 8) written.push(...await Promise.all(cases.slice(i, i + 8).map(c => writer.write(SearchRequestSchema.parse({ query: c.query, tenant_id: "eval", agent_understanding: c.agent_understanding })).catch(e => ({ factors: [], gaps: [], error: String(e?.message ?? e).slice(0, 200) })))));
+  for (let i = 0; i < cases.length; i += Math.max(1, Math.min(concurrency, 4))) written.push(...await Promise.all(cases.slice(i, i + Math.max(1, Math.min(concurrency, 4))).map(c => writer.write(SearchRequestSchema.parse({ query: c.query, tenant_id: "eval", agent_understanding: c.agent_understanding })).catch(e => ({ factors: [], gaps: [], error: String(e?.message ?? e).slice(0, 200) })))));
   for (const [ci, c] of cases.entries()) {
     const m: any = written[ci];
     const fn = m.factors.filter((f: any) => f.class === "functional" && !DEFAULT_KEYS.has(f.key)), ps = m.factors.filter((f: any) => f.class === "psychological");
