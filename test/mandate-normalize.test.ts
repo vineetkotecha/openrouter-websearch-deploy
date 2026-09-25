@@ -6,3 +6,9 @@ describe('model mandate normalization',()=>{it('keeps explicit hard constraints,
  const out=await normalizeModelMandate({intent:'quiet laptop',category:'shopping',factors:[{key:'imagined_risk',class:'psychological',description:'x',value:'high',weight:.9,confidence:.9,hard:false,evidence:[{source:'query'}]},{key:'quiet',class:'functional',description:'low noise',value:'quiet',weight:.8,confidence:.8,hard:false,evidence:[{source:'locale'},{source:'query'}]}],gaps:[]},r,'v2');
  expect(out.factors.length).toBeGreaterThanOrEqual(5);expect(out.factors.find(x=>x.key==='ram')).toMatchObject({hard:true,value:'16GB'});expect(out.factors.some(x=>x.key==='imagined_risk')).toBe(false);expect(out.factors.find(x=>x.key==='quiet')?.evidence).toEqual([{source:'query'}]);
  })});
+
+describe('model gap preservation',()=>{it('keeps a material, specific caller question when its key was not supplied',async()=>{
+ const r=SearchRequestSchema.parse({query:'best laptop',tenant_id:'t'});
+ const x=await normalizeModelMandate({intent:'find a laptop',category:'shopping',factors:[],gaps:[{key:'use_case',material:true,question:'What will the laptop be used for?'}]},r,'v2');
+ expect(x.gaps).toEqual([{key:'use_case',material:true,question:'What will the laptop be used for?'}]);
+})});

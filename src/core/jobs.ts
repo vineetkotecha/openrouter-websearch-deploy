@@ -112,6 +112,7 @@ export function classifyMandate(r: SearchRequest, m: Mandate): Classification {
   else if (domains.length && has(/\b(changed|crawl|map|all pages|across the site|docs site)/, "site_scope")) q = "site_map_crawl";
   else if (known_urls.length || domains.length) { q = "site_extract"; signals.push("known_domain"); }
   else if (structure_need >= 1) { q = "structured_json"; signals.push("structured_fields"); }
+  else if (/\b(near me|nearby|open now|maps?|directions|restaurant|store hours)\b/i.test(r.query)) { q = "local_shopping_maps"; signals.push("explicit_local_query"); }
   else if (has(/\b(filings?|10-[kq]|earnings|sec |patents?|clinical trial|journal|peer.review|papers?|academic)/, "premium_corpus")) q = "premium_domain";
   else if (synthesis_requested) { q = "deep_research"; signals.push("synthesis"); }
   else if (has(/\b(company profile|who is|founders? of|headquarter|org chart|entity)/, "entity")) q = "entity_kg";

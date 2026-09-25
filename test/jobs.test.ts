@@ -24,6 +24,7 @@ describe("mandate classification (11 classes)", () => {
     expect(await c("earnings and 10-K filings for Acme")).toBe("premium_domain");
     expect(await c("running shoes under $100 buy")).toBe("local_shopping_maps");
     expect(await c("latest news on the EU AI act")).toBe("news_fresh");
+    expect(await c("pharmacy near me open now")).toBe("local_shopping_maps");
     expect(await c("startups similar to Linear")).toBe("semantic_discovery");
   });
 });
