@@ -19,3 +19,10 @@ describe('source-grounded factors',()=>{it('preserves explicitly supplied psycho
  expect(x.factors.find(f=>f.key==='risk_aversion')).toMatchObject({class:'psychological',value:'high',hard:false,confidence:.8});
  expect(x.factors.some(f=>f.class==='functional'&&f.hard&&/fresh|week|latest/.test(f.key))).toBe(true);
 })});
+
+import { mandatePrompt } from '../src/prompts/mandate-writer-v2.js';
+describe('mandate gap instructions',()=>{it('distinguishes blocking context from optional refinements',()=>{
+ const p=mandatePrompt('{"query":"quiet laptop for shared office with 16GB RAM"}');
+ expect(p).toContain('A detail that could refine ranking is not automatically a material gap');
+ expect(p).toContain('near me');
+})});
