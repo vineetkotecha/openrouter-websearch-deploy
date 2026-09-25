@@ -33,6 +33,15 @@ export class SearchHarness {
   async search(request: SearchRequest, meta?: { principal?: unknown; surface?: string }): Promise<SearchResponse | NeedsInput | ContextRequest> {
     const startedAt = Date.now(), episode_id = randomUUID();
     const activeRequest={...request,context:request.context.filter(c=>!c.expires_at||Date.parse(c.expires_at)>Date.now())};
+    // Do not pay for mandate generation or call any provider when an unlocated local
+    // search cannot be answered and the caller has forbidden context pull/asking.
+    if (!request.permissions.may_pull_context && !request.permissions.may_ask_user && heuristicGaps(activeRequest).some(g => g.key === "location" && g.material)) {
+      const response: SearchResponse = { status: "complete", episode_id, results: [], route: [],
+        limitations: ["Location is required to answer this local search; no location was supplied, so no providers were called."],
+        route_decision: { task_class: "local_shopping_maps", policy: "location-required", candidates: [], selected: [] } };
+      await Promise.resolve().then(() => this.store.save({ id: episode_id, tenantId: request.tenant_id, request, response, principal: meta?.principal, surface: meta?.surface, startedAt, expiresAt: new Date(Date.now() + 30 * 864e5) })).catch(() => { response.limitations.push("History and usage were not recorded for this search."); });
+      return response;
+    }
     const mandate = await this.writer.write(activeRequest);
     // Writers that return no gaps (heuristic) still get the query-level gap checks.
     // The model may omit a material query-level gap; merge deterministic checks without duplicating keys.

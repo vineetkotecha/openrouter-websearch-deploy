@@ -47,3 +47,9 @@ describe("pulled location reaches providers", () => {
     expect(localizeQuery(req({ query: "history of pizza", context: [{ key: "location", value: "Pune", source: "caller" }] })).query).toBe("history of pizza");
   });
 });
+
+it("skips mandate generation as well as provider calls for an unlocated local query",async()=>{
+ let calls=0; const w:any={write:async()=>{calls++;throw new Error("should not be called")}};
+ const out:any=await new SearchHarness({ SEARCH_TIMEOUT_MS:1000 } as any,w,[],new MemoryStore()).search(req({query:"pharmacy near me open now"}));
+ expect(out.status).toBe("complete");expect(out.results).toEqual([]);expect(calls).toBe(0);
+});
