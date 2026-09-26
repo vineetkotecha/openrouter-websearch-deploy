@@ -39,3 +39,18 @@ describe("grounded answers", () => {
 
 import{extractSurvivors as _xs}from"../src/core/verify.js";
 describe("extract deadline",()=>{it("gives up on a slow page and keeps the snippet",async()=>{const slow:any=(_u:string,i:any)=>new Promise((_,rej)=>i.signal.addEventListener("abort",()=>rej(new Error("aborted"))));const t=Date.now();const r=await _xs([{provider:"exa",url:"https://sec.example.com/10k",title:"10-K",snippet:"s"}],undefined,{fetcher:slow,timeoutMs:200});expect(Date.now()-t).toBeLessThan(1500);expect(r.results[0]!.snippet).toBe("s");expect(r.report.extracted).toBe(0)})});
+
+
+describe("extraction diagnostics",()=>{
+ it("counts HTTP failures and fetch errors separately without logging source bodies",async()=>{
+  const rows=[{provider:"t",url:"https://one.example/a",title:"one",snippet:"claim"},{provider:"t",url:"https://two.example/b",title:"two",snippet:"claim"}];
+  const fetcher:any=async (u:string)=>{if(u.includes("one.example"))return {ok:false,status:403};throw new Error("timeout")};
+  const r=await _xs(rows,undefined,{fetcher,max:2});
+  expect(r.report).toMatchObject({attempted:2,extracted:0,failed_http:1,failed_fetch:1,supported:0,partial:0,unverified:0});
+  expect(JSON.stringify(r.report)).not.toMatch(/one.example|two.example|claim/);
+ });
+ it("counts grades only for extracted pages",async()=>{
+  const r=await _xs([{provider:"t",url:"https://one.example/a",title:"Aero 14",snippet:"The Aero 14 laptop weighs 1.2 kg. Battery life is rated at 14 hours."}],undefined,{fetcher:(async()=>({ok:true,text:async()=>page})) as any});
+  expect(r.report.extracted).toBe(1);expect(r.report.supported).toBe(1);
+ });
+});
