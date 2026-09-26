@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { SearchHarness, MemoryStore } from "../src/core/harness.js";
 import { HeuristicMandateWriter } from "../src/core/mandate.js";
 import { SearchRequestSchema } from "../src/contracts/search.js";
-import { canonicalGaps, heuristicGaps } from "../src/core/context-pull.js";
+import { canonicalContextKey, canonicalGaps, heuristicGaps } from "../src/core/context-pull.js";
 const writer = new HeuristicMandateWriter();
 const fake = { name: "exa", enabled: () => true, search: async () => [{ provider: "exa", url: "https://a.example.com/1", title: "pizza place", snippet: "pizza" }] };
 const okFetch: any = async () => ({ ok: false, text: async () => "" });
@@ -84,3 +84,9 @@ describe('dietary source limits',()=>{it('warns when Jain exclusions were not in
  const out:any=await new SearchHarness({SEARCH_TIMEOUT_MS:1000} as any,writer,[provider as any],new MemoryStore(),{fetcher:okFetch}).search(req({query:'Jain North Indian lunch ideas without onion or garlic'}));
  expect(out.status).toBe('complete');expect(out.limitations.join(' ')).toMatch(/Ingredient lists and preparation were not independently checked/);
 });});
+
+
+it('normalizes intended_use_case to a single use_case request',()=>{
+ expect(canonicalContextKey('intended_use_case')).toBe('use_case');
+ expect(canonicalGaps([{key:'intended_use_case',material:true,question:'What is the intended use?'},{key:'use_case',material:true,question:'What will it be used for?'}]).map(x=>x.key)).toEqual(['use_case']);
+});

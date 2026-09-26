@@ -29,3 +29,12 @@ describe("source-quality ordering",()=>{
   expect(out[0]?.url).toBe("https://b.test");
  });
 });
+
+
+describe('merchant listing gate',()=>{it('does not let a supported video listicle beat comparably relevant merchant listings for a purchase-oriented mandate',()=>{
+ const m:any={intent:'Find product listings for running shoes that meet specific price and availability criteria.',factors:[{key:'price_limit_inr',class:'functional',description:'Maximum price',value:3000,weight:1,confidence:1,hard:true},{key:'market_availability_country',class:'functional',description:'Available for purchase in India',value:'India',weight:1,confidence:1,hard:false}]};
+ const sample=(url:string,title:string,support?:'supported'|'unverified')=>({provider:'serper',url,title,snippet:title,score:.5,raw:support?{faithfulness:{state:support,score:support==='supported'?.8:.2}}:undefined});
+ const items=[sample('https://www.youtube.com/watch?v=1','Best running shoes under 3000','supported'),sample('https://shop.example/running','Buy running shoes under 3000 in India','unverified')];
+ expect(rank(m,items)[0]?.url).toBe('https://shop.example/running');
+ expect(rank({...m,intent:'Watch a review of running shoes'} as any,items)[0]?.url).toBe('https://www.youtube.com/watch?v=1');
+});});
