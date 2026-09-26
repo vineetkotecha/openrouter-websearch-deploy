@@ -30,7 +30,7 @@ export class SearchHarness {
     this.health = opts.health ?? new ProviderHealth();
   }
 
-  async search(request: SearchRequest, meta?: { principal?: unknown; surface?: string }): Promise<SearchResponse | NeedsInput | ContextRequest> {
+  async search(request: SearchRequest, meta?: { principal?: unknown; surface?: string; trace?: (stage:string, data:unknown)=>void }): Promise<SearchResponse | NeedsInput | ContextRequest> {
     const startedAt = Date.now(), episode_id = randomUUID();
     const activeRequest={...request,context:request.context.filter(c=>!c.expires_at||Date.parse(c.expires_at)>Date.now())};
     // Do not pay for mandate generation or call any provider when an unlocated local
@@ -42,15 +42,18 @@ export class SearchHarness {
       if (request.permissions.may_retain) await Promise.resolve().then(() => this.store.save({ id: episode_id, tenantId: request.tenant_id, request, response, principal: meta?.principal, surface: meta?.surface, startedAt, expiresAt: new Date(Date.now() + 30 * 864e5) })).catch(() => { response.limitations.push("History and usage were not recorded for this search."); });
       return response;
     }
+    meta?.trace?.('1_request', {query:request.query, tenant_id:request.tenant_id, context:contextUsed(activeRequest),permissions:request.permissions,limits:request.limits});
     const mandate = await this.writer.write(activeRequest);
+    meta?.trace?.('2_mandate_writer', mandate);
     // Writers that return no gaps (heuristic) still get the query-level gap checks.
     // The model may omit a material query-level gap; merge deterministic checks without duplicating keys.
     for (const g of heuristicGaps(activeRequest)) if (!mandate.gaps.some(x => x.key === g.key)) mandate.gaps.push(g);
     mandate.gaps = openGaps(mandate, activeRequest);
     const fillDecision=decideFill(mandate,request);
+    meta?.trace?.('3_gap_and_fill_decision',{gaps:mandate.gaps,fillDecision});
     const gap = fillDecision.ask.length?mandate.gaps.find(g=>g.key===fillDecision.ask[0]!.key):mandate.gaps.find(g=>g.material);
     // Pull from the calling agent first; ask the human only if the caller cannot pull.
-    if (fillDecision.ask.length && request.permissions.may_pull_context) { const first=mandate.gaps.find(g=>g.key===fillDecision.ask[0]!.key)!; const out=contextRequest(episode_id,first,request); out.requested_context=fillDecision.ask.map(x=>({key:x.key,why:x.reason+": "+x.question,accepted_sources:["caller","human","prior_outcome"],scope:request.permissions.scopes.length?request.permissions.scopes:["this_search"]}));out.question=fillDecision.ask.map(x=>x.question).join(" ");return out; }
+    if (fillDecision.ask.length && request.permissions.may_pull_context) { const first=mandate.gaps.find(g=>g.key===fillDecision.ask[0]!.key)!; const out=contextRequest(episode_id,first,request); out.requested_context=fillDecision.ask.map(x=>({key:x.key,why:x.reason+": "+x.question,accepted_sources:["caller","human","prior_outcome"],scope:request.permissions.scopes.length?request.permissions.scopes:["this_search"]}));out.question=fillDecision.ask.map(x=>x.question).join(" ");meta?.trace?.('4_context_request',out);return out; }
     // A resumable question persists the entire request, so it requires retention permission.
     if (gap?.question && request.permissions.may_ask_user && request.permissions.may_retain && this.ask) {
       const pending = await this.ask({ episode_id, request, question: gap.question, gap: gap.key, principal: meta?.principal }).catch(() => null);
@@ -70,7 +73,9 @@ export class SearchHarness {
     // hard fails, budgets and fallback deterministic.
     const decision = await routeWithPolicy(activeRequest, mandate, this.providers);
     const jevPick = decision.policy.startsWith("jev") ? decision.selected[0]?.provider_name : undefined;
+    meta?.trace?.('4_policy_route',decision);
     const plan = planJobs(activeRequest, mandate, this.providers, this.health, jevPick);
+    meta?.trace?.('5_job_plan',plan);
     const deadline = Math.min(this.c.SEARCH_TIMEOUT_MS, request.limits.latency_ms);
 
     const providerRequest = localizeQuery(activeRequest);
@@ -88,6 +93,7 @@ export class SearchHarness {
     };
     const grade = (xs: ProviderResult[]) => { const top = rank(mandate, xs, 3); return top.length ? top.reduce((a, x) => a + x.mandate_fit, 0) / top.length : 0; };
     const exec = await executePlan(plan, this.providers, call, grade, this.health);
+    meta?.trace?.('6_provider_execution',{runs:exec.runs,result_count:exec.results.length,candidates:exec.results.map(x=>({provider:x.provider,url:x.url,title:x.title})),fallback_used:exec.fallback_used,escalated:exec.escalated,skipped:exec.skipped});
 
     // Known-URL shortcut: the URLs themselves are the candidates; no discovery spend.
     const known: ProviderResult[] = plan.classification.known_urls.map(url => ({ provider: "known_url", url, title: url, snippet: "" }));
@@ -98,8 +104,10 @@ export class SearchHarness {
     for (const x of pool) { if (!byCanon.has(x.url)) byCanon.set(x.url, x); }
     const ordered = triaged.map(t => byCanon.get(t.url)!).filter(Boolean);
     const known_first = [...ordered.filter(x => x.provider === "known_url"), ...ordered.filter(x => x.provider !== "known_url")];
+    meta?.trace?.('7_triage_and_dedupe',{pool_count:pool.length,triaged:triaged.map(x=>({rank:x.rank,url:x.url,title:x.title,mandate_fit:x.mandate_fit,faithfulness:x.faithfulness})),ordered_urls:known_first.map(x=>x.url)});
     const { results: extracted, report } = await extractSurvivors(known_first, undefined, { max: Math.max(plan.budget.max_extracts, known.length ? Math.min(known.length, 5) : 0), maxChars: plan.budget.max_extract_chars, tokenBudget: plan.budget.token_budget, fetcher: this.opts.fetcher, judge: this.opts.judge , fields: plan.classification.structured_fields});
     const rest = pool.filter(x => !known_first.includes(x));
+    meta?.trace?.('8_extraction',{report,extracted:extracted.map(x=>({provider:x.provider,url:x.url,title:x.title,fields:x.fields})),untriaged_count:rest.length});
 
     const limitations: string[] = [];
     const anyEnabled = this.providers.some(p => p.enabled());
@@ -111,7 +119,9 @@ export class SearchHarness {
     for (const n of plan.notes) if (/no .* provider live/i.test(n)) limitations.push(n);
     const firstJob = plan.jobs[0];
     const initialRank=rank(mandate, [...extracted, ...rest], request.limits.max_results);
+    meta?.trace?.('9_initial_rank',initialRank);
     const reranked=await jevRerank(activeRequest,mandate,initialRank);
+    meta?.trace?.('10_jev_rerank',reranked);
     const response: SearchResponse = {
       status: "complete", episode_id,
       results: reranked.results,
@@ -131,6 +141,7 @@ export class SearchHarness {
         known_urls: plan.classification.known_urls, extraction: report, context: contextUsed(activeRequest), gaps: mandate.gaps.map(g => ({ key: g.key, material: g.material })), fill: plan.classification.structured_fields.length ? fillSummary(plan.classification.structured_fields, extracted.map(x => (x as any).fields)) : undefined, notes: [...plan.notes,...fillDecision.defaults.map(x=>`default:${x.key} - ${x.reason}`),`jev_rerank: ${reranked.successful}/${reranked.attempted}; tokens ${reranked.usage.input_tokens}/${reranked.usage.output_tokens}`],
       },
     };
+    meta?.trace?.('11_response',response);
     // Storage must never fail a search: record the failure and still return results.
     if (request.permissions.may_retain) await Promise.resolve().then(() => this.store.save({ id: episode_id, tenantId: request.tenant_id, request, response, mandate, principal: meta?.principal, surface: meta?.surface, startedAt, expiresAt: new Date(Date.now() + 30 * 864e5) })).catch(e => { console.error("episode save failed", String((e as Error)?.message ?? e).slice(0, 200)); response.limitations.push("History and usage were not recorded for this search."); });
     return response;

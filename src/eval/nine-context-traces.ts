@@ -27,20 +27,22 @@ export async function runNineContextTraces(h:SearchHarness,tenantId:string,provi
       permissions:{may_pull_context:true,may_ask_user:false,may_retain:false,may_learn:false,scopes:['nine-trace-eval']},
       limits:{latency_ms:10000,max_provider_calls:3,max_results:5,max_extracts:5,allow_deep_research:false}});
     const start=Date.now();
+    const stages:Array<{stage:string;data:unknown}>=[];
+    const trace=(stage:string,data:unknown)=>{stages.push({stage,data})};
     try{
       // First query is always context-free: show the actual request to the caller.
       // Only retry when a response asks for a key the caller has independently supplied.
-      const initial=await h.search(makeRequest([]),{surface:'nine_context_trace'});
+      const initial=await h.search(makeRequest([]),{surface:'nine_context_trace',trace});
       const asked=initial.status==='needs_input'&&'requested_context'in initial?initial.requested_context:[];
       const answered=used.filter(x=>asked.some(y=>y.key===x.key));
-      const final=answered.length?await h.search(makeRequest(answered),{surface:'nine_context_trace'}):initial;
-      rows.push({id:c.id,query:c.query,parameters_requested:asked,parameters_supplied:answered.map(x=>({case_id:x.case_id,key:x.key,source:x.source,confidence:x.confidence,observed_at:x.observed_at})),
+      const final=answered.length?await h.search(makeRequest(answered),{surface:'nine_context_trace',trace}):initial;
+      rows.push({id:c.id,query:c.query,stages,parameters_requested:asked,parameters_supplied:answered.map(x=>({case_id:x.case_id,key:x.key,source:x.source,confidence:x.confidence,observed_at:x.observed_at})),
         initial_status:initial.status,status:final.status,latency_ms:Date.now()-start,
         ...(final.status==='complete'?{query_class:final.plan?.query_class??final.route_decision?.task_class,route:final.route,route_decision:final.route_decision,extraction:final.plan?.extraction,
           fallback_used:final.plan?.fallback_used??[],context_trace:final.plan?.context,limitations:final.limitations,
           top_results:final.results.slice(0,3).map(x=>({title:x.title,url:x.url,provider:x.provider,mandate_fit:x.mandate_fit,faithfulness:x.faithfulness,reason:x.reason}))}:
           {context_request:final.status==='needs_input'&&'requested_context'in final?final.requested_context:[],gap:'gap'in final?final.gap:undefined,question:'question'in final?final.question:undefined})});
-    }catch(e){rows.push({id:c.id,query:c.query,parameters_requested:[],parameters_supplied:[],status:'error',latency_ms:Date.now()-start,error:String((e as Error)?.message??e).slice(0,160)})}
+    }catch(e){rows.push({id:c.id,query:c.query,stages,parameters_requested:[],parameters_supplied:[],status:'error',latency_ms:Date.now()-start,error:String((e as Error)?.message??e).slice(0,160)})}
   }
-  return {version:'nine-context-traces-v2',ran_at:new Date().toISOString(),retention:'off',method:'nine distinct authored test questions, optionally filtered; first call requests context from calling agent, then supplied answers are retried without retention',rows};
+  return {version:'nine-context-traces-v3',ran_at:new Date().toISOString(),retention:'off',method:'nine distinct authored test questions, optionally filtered; first call requests context from calling agent, then supplied answers are retried without retention',rows};
 }
