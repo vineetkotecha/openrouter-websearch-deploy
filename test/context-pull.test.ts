@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { SearchHarness, MemoryStore } from "../src/core/harness.js";
 import { HeuristicMandateWriter } from "../src/core/mandate.js";
 import { SearchRequestSchema } from "../src/contracts/search.js";
-import { heuristicGaps } from "../src/core/context-pull.js";
+import { canonicalGaps, heuristicGaps } from "../src/core/context-pull.js";
 const writer = new HeuristicMandateWriter();
 const fake = { name: "exa", enabled: () => true, search: async () => [{ provider: "exa", url: "https://a.example.com/1", title: "pizza place", snippet: "pizza" }] };
 const okFetch: any = async () => ({ ok: false, text: async () => "" });
@@ -71,4 +71,9 @@ describe('visible evidence limits',()=>{it('states unverified freshness instead 
  const out:any=await harness.search(req({query:'latest news on batteries'}));
  expect(out.status).toBe('complete');expect(out.limitations.join(' ')).toMatch(/Freshness/);
  expect(out.limitations.join(' ')).toMatch(/Freshness/);
+});});
+
+
+describe('origin alias normalization',()=>{it('collapses origin_location and origin to one request',()=>{
+ expect(canonicalGaps([{key:'origin_location',material:true,question:'From where?'},{key:'origin',material:true,question:'Where would you leave from?'}])).toEqual([{key:'origin',material:true,question:'From where?'}]);
 });});

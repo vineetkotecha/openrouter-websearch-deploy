@@ -16,6 +16,13 @@ describe('nine context traces',()=>{
   expect(h.search.mock.calls[3][0].context).toHaveLength(0);
   expect(NINE_CASES).toHaveLength(9);
  });
+ it('accepts a caller parameter when the model requests an alias for that key',async()=>{
+  const h:any={search:vi.fn(async(req:any)=>req.context.length?{status:'complete',results:[],route:[],limitations:[]}:{status:'needs_input',kind:'context_request',gap:'user_current_location',question:'Where?',requested_context:[{key:'user_current_location'}]})};
+  const result=await runNineContextTraces(h,'t',[{case_id:'N02',key:'location',value:'Bengaluru',source:'caller',confidence:1}],['N02']);
+  expect(h.search).toHaveBeenCalledTimes(2);
+  expect(h.search.mock.calls[1][0].context).toMatchObject([{key:'location',value:'Bengaluru'}]);
+  expect(result.rows[0].parameters_supplied).toMatchObject([{key:'location'}]);
+ });
  it('rejects unapproved context keys and unauthenticated route',async()=>{
   const h=new SearchHarness(cfg,new HeuristicMandateWriter(),[],new MemoryStore());
   const app=await makeApp(cfg,h,new MemoryStore());

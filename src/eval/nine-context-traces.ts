@@ -1,5 +1,6 @@
 // Nine fixed, distinct agent-style searches. User context is supplied at invocation,
 // never embedded in the public repository or persisted as an episode.
+import { canonicalContextKey } from '../core/context-pull.js';
 import { SearchRequestSchema } from '../contracts/search.js';
 import type { SearchHarness } from '../core/harness.js';
 
@@ -34,7 +35,7 @@ export async function runNineContextTraces(h:SearchHarness,tenantId:string,provi
       // Only retry when a response asks for a key the caller has independently supplied.
       const initial=await h.search(makeRequest([]),{surface:'nine_context_trace',trace});
       const asked=initial.status==='needs_input'&&'requested_context'in initial?initial.requested_context:[];
-      const answered=used.filter(x=>asked.some(y=>y.key===x.key));
+      const answered=used.filter(x=>asked.some(y=>canonicalContextKey(y.key)===canonicalContextKey(x.key)));
       const final=answered.length?await h.search(makeRequest(answered),{surface:'nine_context_trace',trace}):initial;
       rows.push({id:c.id,query:c.query,stages,parameters_requested:asked,parameters_supplied:answered.map(x=>({case_id:x.case_id,key:x.key,source:x.source,confidence:x.confidence,observed_at:x.observed_at})),
         initial_status:initial.status,status:final.status,latency_ms:Date.now()-start,
