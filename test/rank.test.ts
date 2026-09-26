@@ -38,3 +38,11 @@ describe('merchant listing gate',()=>{it('does not let a supported video listicl
  expect(rank(m,items)[0]?.url).toBe('https://shop.example/running');
  expect(rank({...m,intent:'Watch a review of running shoes'} as any,items)[0]?.url).toBe('https://www.youtube.com/watch?v=1');
 });});
+
+
+it('keeps discussion and video pages behind merchant candidates on purchase-intent searches without changing their source faithfulness',()=>{
+ const m:any={intent:'Find running shoes for purchase under ₹3000 and available in India',factors:[{key:'price_limit_inr',class:'functional',description:'Maximum price under ₹3000',value:3000,weight:1,confidence:1,hard:true}]};
+ const x=(url:string,title:string,state:'supported'|'unverified')=>({provider:'serper',url,title,snippet:title,score:.5,raw:{faithfulness:{state,score:state==='supported'?1:.2}}});
+ const out=rank(m,[x('https://www.quora.com/Best-running-shoes','Best running shoes under 3000','supported'),x('https://www.reddit.com/r/running','Running shoes under 3000 discussion','unverified'),x('https://www.myntra.com/sports-shoes-under-3000','Buy sports shoes under 3000','unverified')]);
+ expect(out[0]?.url).toContain('myntra.com');expect(out.find(v=>v.url.includes('quora.com'))?.faithfulness.state).toBe('supported');
+});
