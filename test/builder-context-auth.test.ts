@@ -12,7 +12,8 @@ describe('builder context write policy',()=>{
  });
  it('grants the initial builder owner the admin role and a scoped key',()=>{
    expect(store).toContain("VALUES($1,$2,$3,$4,$5,'admin')");
-   expect(store).toContain("ARRAY['search','mcp','dashboard','context:write']");
+   expect(store).toContain("ARRAY['search','mcp']");
+   expect(store).toContain('verified_at IS NOT NULL');
  });
  it('uses exact IDs and fails closed on mismatch, without blanket promotion',()=>{
    expect(migration).toContain("id='b5787abf-f6fe-414b-a6bf-e3ff03d3dc99'");
