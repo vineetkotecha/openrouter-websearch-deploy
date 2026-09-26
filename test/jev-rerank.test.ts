@@ -8,9 +8,13 @@ describe("Jev rerank gates",()=>{
  it("only reorders eligible candidates and leaves failed evidence or explicit fields in place",async()=>{
   const mandate=await new HeuristicMandateWriter().write(request);const xs=[item(1,"partial"),item(2,"supported"),item(3,"unverified"),item(4,"supported","missing")];
   const out=await jevRerank(request,mandate,xs as any,async(_r,_m,x)=>x.url.endsWith("/2")?.99:.01);
-  expect(out.results.map(x=>x.url)).toEqual([xs[1].url,xs[0].url,xs[2].url,xs[3].url]);expect(out.attempted).toBe(2);
+  expect(out.results.map(x=>x.url)).toEqual([xs[1].url,xs[0].url,xs[2].url,xs[3].url]);expect(out.attempted).toBe(2);expect(out.reason).toBe("reranked");expect(out.latency_ms).toBeGreaterThanOrEqual(0);
  });
  it("falls back to initial rank when any scoring call fails",async()=>{
-  const mandate=await new HeuristicMandateWriter().write(request);const xs=[item(1,"supported"),item(2,"partial")];const out=await jevRerank(request,mandate,xs as any,async(_r,_m,x)=>{if(x.url.endsWith("/2"))throw new Error("down");return .2});expect(out.results.map(x=>x.url)).toEqual(xs.map(x=>x.url));expect(out.successful).toBe(1);
+  const mandate=await new HeuristicMandateWriter().write(request);const xs=[item(1,"supported"),item(2,"partial")];const out=await jevRerank(request,mandate,xs as any,async(_r,_m,x)=>{if(x.url.endsWith("/2"))throw new Error("down");return .2});expect(out.results.map(x=>x.url)).toEqual(xs.map(x=>x.url));expect(out.successful).toBe(1);expect(out.reason).toBe("model_failed_fallback");
+ });
+ it("explains an ineligible pool without model calls",async()=>{
+ const mandate=await new HeuristicMandateWriter().write(request);const out=await jevRerank(request,mandate,[item(1,"unverified"),item(2,"partial")] as any,async()=>.8);
+ expect(out.reason).toBe("fewer_than_two_eligible");expect(out.attempted).toBe(0);
  });
 });
