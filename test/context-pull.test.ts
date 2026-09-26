@@ -123,3 +123,9 @@ it('answers broad Notion alternatives instead of requiring unspecified startup p
  const out:any=await harness.search(req({query:'alternatives to Notion for a startup knowledge base',permissions:{may_pull_context:true}}));
  expect(out.status).toBe('complete');
 });
+
+
+it('collapses location_of_origin and origin without merging destination',()=>{
+ expect(canonicalGaps([{key:'location_of_origin',material:true,question:'Where do you start?'},{key:'origin',material:true,question:'From where?'}]).map(x=>x.key)).toEqual(['origin']);
+ expect(canonicalContextKey('origin_or_destination')).toBe('origin_or_destination');
+});
