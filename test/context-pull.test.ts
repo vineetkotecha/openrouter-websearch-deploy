@@ -39,7 +39,7 @@ describe("calling-agent context pull", () => {
     expect(out.limitations.join(" ")).toMatch(/Location is required/);
   });
 });
-import { localizeQuery } from "../src/core/context-pull.js";
+import { formProviderQuery, localizeQuery } from "../src/core/context-pull.js";
 describe("pulled location reaches providers", () => {
   it("replaces near me with the supplied location", () => {
     expect(localizeQuery(req({ query: "pizza near me", context: [{ key: "location", value: "Koramangala, Bengaluru", source: "caller" }] })).query).toBe("pizza in Koramangala, Bengaluru");
@@ -89,4 +89,21 @@ describe('dietary source limits',()=>{it('warns when Jain exclusions were not in
 it('normalizes intended_use_case to a single use_case request',()=>{
  expect(canonicalContextKey('intended_use_case')).toBe('use_case');
  expect(canonicalGaps([{key:'intended_use_case',material:true,question:'What is the intended use?'},{key:'use_case',material:true,question:'What will it be used for?'}]).map(x=>x.key)).toEqual(['use_case']);
+});
+
+
+describe('explicit two-pass provider query formation',()=>{
+ it('shows no invented prefill and uses an evidenced high-confidence use case only after fill',()=>{
+ const r=req({query:'best laptop',context:[{key:'use_case',value:'coding and agent work',source:'caller',confidence:.95}]});
+ expect(formProviderQuery(r,'pre_fill')).toMatchObject({provider_query:'best laptop',context_keys:[],changed:false});
+ expect(formProviderQuery(r,'post_fill')).toMatchObject({provider_query:'best laptop for coding and agent work',context_keys:['use_case'],changed:true});
+ });
+ it('does not turn stale, low-confidence, or psychologically classified context into a provider query',()=>{
+ const cases=[{key:'origin',value:'Bangalore',source:'caller',confidence:.3},{key:'origin',value:'Bangalore',source:'caller',confidence:.9,expires_at:'2020-01-01T00:00:00Z'},{key:'origin',value:'Bangalore',source:'caller',confidence:1,class:'psychological'}];
+ for(const c of cases)expect(formProviderQuery(req({query:'weekend trip',context:[c]}),'post_fill').provider_query).toBe('weekend trip');
+ });
+ it('rewrites a supplied current location but never adds a residence absent from the request',()=>{
+ expect(formProviderQuery(req({query:'pharmacy near me open now'}),'pre_fill').provider_query).toBe('pharmacy near me open now');
+ expect(formProviderQuery(req({query:'pharmacy near me open now',context:[{key:'location',value:'Pune',source:'caller',confidence:.95}]}),'post_fill').provider_query).toBe('pharmacy in Pune open now');
+ });
 });

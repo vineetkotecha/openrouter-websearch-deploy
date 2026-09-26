@@ -8,7 +8,7 @@ import type { SearchProvider } from "../providers/base.js";
 import { rank } from "./rank.js";
 import { extractSurvivors } from "./verify.js";
 import { fillSummary } from "./fill.js";
-import { heuristicGaps, openGaps, canonicalContextKey, contextRequest, contextUsed, localizeQuery, type ContextRequest } from "./context-pull.js";
+import { heuristicGaps, openGaps, canonicalContextKey, contextRequest, contextUsed, formProviderQuery, type ContextRequest } from "./context-pull.js";
 import type { LlmJudge } from "./faithfulness.js";
 import { routeWithPolicy } from "./jev-router.js";
 import { executePlan, planJobs, ProviderHealth, type PlannedJob } from "./jobs.js";
@@ -43,6 +43,7 @@ export class SearchHarness {
       return response;
     }
     meta?.trace?.('1_request', {query:request.query, tenant_id:request.tenant_id, context:contextUsed(activeRequest),permissions:request.permissions,limits:request.limits});
+    meta?.trace?.('1a_prefill_query_formation',formProviderQuery(activeRequest,"pre_fill"));
     const mandate = await this.writer.write(activeRequest);
     meta?.trace?.('2_mandate_writer', mandate);
     // Writers that return no gaps (heuristic) still get the query-level gap checks.
@@ -78,7 +79,9 @@ export class SearchHarness {
     meta?.trace?.('5_job_plan',plan);
     const deadline = Math.min(this.c.SEARCH_TIMEOUT_MS, request.limits.latency_ms);
 
-    const providerRequest = localizeQuery(activeRequest);
+    const formed=formProviderQuery(activeRequest,"post_fill");
+    meta?.trace?.('5a_postfill_query_formation',formed);
+    const providerRequest={...activeRequest,query:formed.provider_query};
     const call = async (p: SearchProvider, job: PlannedJob) => {
       const ctl = new AbortController(), s = Date.now();
       const t = setTimeout(() => ctl.abort(), deadline);

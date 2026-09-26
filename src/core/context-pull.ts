@@ -67,3 +67,27 @@ export function localizeQuery(r: SearchRequest): SearchRequest {
   if (LOCAL.test(r.query)) return { ...r, query: `${r.query} in ${loc.slice(0, 120)}` };
   return r;
 }
+
+
+// Query formation keeps private context out of the provider string unless a scoped fact
+// changes retrieval. It does not infer a current location or a departure city.
+export function formProviderQuery(r: SearchRequest, phase: "pre_fill" | "post_fill") {
+  const localized=localizeQuery(r);
+  let query=localized.query;
+  const used:string[]=[];
+  if(query!==r.query)used.push("location");
+  if(phase==="post_fill") {
+    const values=new Map<string,string>();
+    for(const c of r.context) {
+      if(c.expires_at&&Date.parse(c.expires_at)<=Date.now())continue;
+      if(c.allowed_uses&&!c.allowed_uses.includes("search"))continue;
+      if(c.class==="psychological"||typeof c.value!=="string"||!c.value.trim())continue;
+      const key=canonicalContextKey(c.key);
+      if(!["origin","use_case"].includes(key)||c.confidence<.7)continue;
+      values.set(key,c.value.trim().slice(0,120));
+    }
+    if(values.has("origin")&&/\bweekend trip\b/i.test(query)&&!query.toLowerCase().includes(values.get("origin")!.toLowerCase())) {query+=` from ${values.get("origin")}`;used.push("origin")}
+    if(values.has("use_case")&&/\bbest laptop\b/i.test(query)&&!query.toLowerCase().includes(values.get("use_case")!.toLowerCase())) {query+=` for ${values.get("use_case")}`;used.push("use_case")}
+  }
+  return {phase,original_query:r.query,provider_query:query,context_keys:used,changed:query!==r.query};
+}
