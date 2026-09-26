@@ -119,6 +119,7 @@ export class SearchHarness {
     for (const n of plan.notes) if (/no .* provider live/i.test(n)) limitations.push(n);
     if(report.failed_fetch)limitations.push(`${report.failed_fetch} of ${report.attempted} source pages could not be fetched; their claims were not verified.`);
     if(report.unverified)limitations.push(`${report.unverified} extracted sources remained unverified.`);
+    if(/\b(?:Jain|without onion|without garlic|no onion|no garlic)\b/i.test(request.query))limitations.push('Ingredient lists and preparation were not independently checked for Jain or onion/garlic restrictions; verify the full recipe before use.');
     if(/\bpeer.reviewed\b/i.test(request.query))limitations.push('Peer-review status was not checked against a journal or proceedings record; repository pages alone do not prove it.');
     if(/\b(?:buy|available|under [₹$€£]|price)\b/i.test(request.query))limitations.push('Current price, stock and purchasability were not verified against a merchant listing.');
     if(/\b(?:latest|open now|today|current)\b/i.test(request.query))limitations.push('Freshness, current hours or publication date were not independently verified.');

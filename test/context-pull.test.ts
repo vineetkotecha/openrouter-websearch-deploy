@@ -77,3 +77,10 @@ describe('visible evidence limits',()=>{it('states unverified freshness instead 
 describe('origin alias normalization',()=>{it('collapses origin_location and origin to one request',()=>{
  expect(canonicalGaps([{key:'origin_location',material:true,question:'From where?'},{key:'origin',material:true,question:'Where would you leave from?'}])).toEqual([{key:'origin',material:true,question:'From where?'}]);
 });});
+
+
+describe('dietary source limits',()=>{it('warns when Jain exclusions were not independently checked',async()=>{
+ const provider={name:'exa',enabled:()=>true,search:async()=>[{provider:'exa',url:'https://recipe.example/jain-palak-paneer',title:'Jain palak paneer',snippet:'No onion or garlic'}]};
+ const out:any=await new SearchHarness({SEARCH_TIMEOUT_MS:1000} as any,writer,[provider as any],new MemoryStore(),{fetcher:okFetch}).search(req({query:'Jain North Indian lunch ideas without onion or garlic'}));
+ expect(out.status).toBe('complete');expect(out.limitations.join(' ')).toMatch(/Ingredient lists and preparation were not independently checked/);
+});});
