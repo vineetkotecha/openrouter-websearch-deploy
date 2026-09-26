@@ -26,3 +26,13 @@ describe('mandate gap instructions',()=>{it('distinguishes blocking context from
  expect(p).toContain('A detail that could refine ranking is not automatically a material gap');
  expect(p).toContain('near me');
 })});
+
+describe('strict factor provenance',()=>{it('rejects fabricated human evidence and invented hard dates',async()=>{
+ const r=SearchRequestSchema.parse({query:'weekend trip',tenant_id:'t'});
+ const x=await normalizeModelMandate({intent:r.query,category:'travel',factors:[
+  {key:'source_reliability',class:'functional',description:'reputable',value:'reputable',weight:.7,confidence:.8,hard:false,evidence:[{source:'human',reference:'general search quality'}]},
+  {key:'trip_duration',class:'functional',description:'two or three days',value:3,weight:1,confidence:1,hard:true,evidence:[{source:'query',reference:'weekend trip'}]}
+ ],gaps:[]},r,'v2');
+ expect(x.factors.some(f=>f.key==='source_reliability')).toBe(false);
+ expect(x.factors.find(f=>f.key==='trip_duration')?.hard).toBe(false);
+});});

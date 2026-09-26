@@ -8,7 +8,7 @@ import type { SearchProvider } from "../providers/base.js";
 import { rank } from "./rank.js";
 import { extractSurvivors } from "./verify.js";
 import { fillSummary } from "./fill.js";
-import { heuristicGaps, openGaps, contextRequest, contextUsed, localizeQuery, type ContextRequest } from "./context-pull.js";
+import { heuristicGaps, openGaps, canonicalContextKey, contextRequest, contextUsed, localizeQuery, type ContextRequest } from "./context-pull.js";
 import type { LlmJudge } from "./faithfulness.js";
 import { routeWithPolicy } from "./jev-router.js";
 import { executePlan, planJobs, ProviderHealth, type PlannedJob } from "./jobs.js";
@@ -47,7 +47,7 @@ export class SearchHarness {
     meta?.trace?.('2_mandate_writer', mandate);
     // Writers that return no gaps (heuristic) still get the query-level gap checks.
     // The model may omit a material query-level gap; merge deterministic checks without duplicating keys.
-    for (const g of heuristicGaps(activeRequest)) if (!mandate.gaps.some(x => x.key === g.key)) mandate.gaps.push(g);
+    for (const g of heuristicGaps(activeRequest)) if (!mandate.gaps.some(x => canonicalContextKey(x.key) === canonicalContextKey(g.key))) mandate.gaps.push(g);
     mandate.gaps = openGaps(mandate, activeRequest);
     const fillDecision=decideFill(mandate,request);
     meta?.trace?.('3_gap_and_fill_decision',{gaps:mandate.gaps,fillDecision});
@@ -117,6 +117,11 @@ export class SearchHarness {
     for(const k of fillDecision.stale) limitations.push(`Stale context ignored: ${k}.`);
     if ((mandate as any).fallback_reason) limitations.push(`Mandate writer fell back to heuristic (${(mandate as any).fallback_reason}).`);
     for (const n of plan.notes) if (/no .* provider live/i.test(n)) limitations.push(n);
+    if(report.failed_fetch)limitations.push(`${report.failed_fetch} of ${report.attempted} source pages could not be fetched; their claims were not verified.`);
+    if(report.unverified)limitations.push(`${report.unverified} extracted sources remained unverified.`);
+    if(/\bpeer.reviewed\b/i.test(request.query))limitations.push('Peer-review status was not checked against a journal or proceedings record; repository pages alone do not prove it.');
+    if(/\b(?:buy|available|under [₹$€£]|price)\b/i.test(request.query))limitations.push('Current price, stock and purchasability were not verified against a merchant listing.');
+    if(/\b(?:latest|open now|today|current)\b/i.test(request.query))limitations.push('Freshness, current hours or publication date were not independently verified.');
     const firstJob = plan.jobs[0];
     const initialRank=rank(mandate, [...extracted, ...rest], request.limits.max_results);
     meta?.trace?.('9_initial_rank',initialRank);

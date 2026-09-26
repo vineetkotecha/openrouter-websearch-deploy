@@ -10,12 +10,16 @@ export type ContextRequest = {
 };
 
 const LOCAL = /\b(near me|nearby|near by|around me|in my area|closest|open now|local)\b/i;
+// Canonical parameter names shared by the model, heuristic gap checks and calling agent.
+const aliases:Record<string,string[]>={location:['location','user_location','user_current_location','current_location','city','area'],use_case:['use_case','primary_use_case','laptop_use_case','purpose','usage'],origin:['origin','starting_location','departure_location','departure_city'],budget:['budget','price','max_price','price_max']};
+export const canonicalContextKey=(key:string)=>Object.entries(aliases).find(([,keys])=>keys.includes(key.toLowerCase()))?.[0]??key.toLowerCase();
+export function canonicalGaps(gaps:Mandate['gaps']):Mandate['gaps']{const byKey=new Map<string,Mandate['gaps'][number]>();for(const gap of gaps){const key=canonicalContextKey(gap.key);const old=byKey.get(key);if(!old)byKey.set(key,{...gap,key});else if(!old.question&&gap.question)byKey.set(key,{...old,question:gap.question});}return [...byKey.values()]}
 const BUY = /\b(buy|purchase|shop|order|price|cheap|deal|under \$?[0-9])\b/i;
 
 // Heuristic gaps: only facts the query cannot answer and that change the result set.
 // Location for "near me" searches is material; budget for shopping is not (we still rank without it).
 export function heuristicGaps(r: SearchRequest): Mandate["gaps"] {
-  const has = (k: RegExp) => r.context.some(c => (!c.expires_at||Date.parse(c.expires_at)>Date.now())&&k.test(c.key)&&c.value!=null&&String(c.value).trim()!=="") || Object.entries(r.hard_constraints).some(([key,value]) => k.test(key)&&value!=null&&String(value).trim()!=="");
+  const has = (k: RegExp) => r.context.some(c => (!c.expires_at||Date.parse(c.expires_at)>Date.now())&&(k.test(c.key)||k.test(canonicalContextKey(c.key)))&&c.value!=null&&String(c.value).trim()!=="") || Object.entries(r.hard_constraints).some(([key,value]) => k.test(key)&&value!=null&&String(value).trim()!=="");
   const gaps: Mandate["gaps"] = [];
   // Broad shopping requests need the intended use before the result set is meaningful.
   if (/\bbest laptop\b/i.test(r.query) && !has(/^(use_case|purpose|usage)/i))
@@ -33,8 +37,8 @@ export function heuristicGaps(r: SearchRequest): Mandate["gaps"] {
 
 // Drop gaps the caller already answered through context or hard constraints.
 export function openGaps(m: Mandate, r: SearchRequest): Mandate["gaps"] {
-  const answered = new Set([...r.context.filter(c=>!c.expires_at||Date.parse(c.expires_at)>Date.now()).map(c => c.key.toLowerCase()), ...Object.keys(r.hard_constraints).map(k => k.toLowerCase())]);
-  return m.gaps.filter(g => !answered.has(g.key.toLowerCase()));
+  const answered = new Set([...r.context.filter(c=>!c.expires_at||Date.parse(c.expires_at)>Date.now()).map(c => canonicalContextKey(c.key)), ...Object.keys(r.hard_constraints).map(canonicalContextKey)]);
+  return canonicalGaps(m.gaps).filter(g => !answered.has(g.key));
 }
 
 export function contextRequest(episode_id: string, gap: { key: string; question?: string }, r: SearchRequest): ContextRequest {
@@ -55,7 +59,7 @@ export function contextUsed(r: SearchRequest) {
 // Provider-facing query: a pulled location replaces "near me" so providers search the right place.
 // The caller's other context stays out of the provider query.
 export function localizeQuery(r: SearchRequest): SearchRequest {
-  const item = r.context.find(c => (!c.expires_at||Date.parse(c.expires_at)>Date.now()) && /^(location|city|area|address)$/i.test(c.key) && typeof c.value === "string" && c.value.trim());
+  const item = r.context.find(c => (!c.expires_at||Date.parse(c.expires_at)>Date.now()) && /^(location|city|area|address)$/i.test(canonicalContextKey(c.key)) && typeof c.value === "string" && c.value.trim());
   const loc = (item?.value as string | undefined) ?? (typeof r.hard_constraints.location === "string" ? r.hard_constraints.location : undefined);
   if (!loc || r.query.toLowerCase().includes(loc.toLowerCase())) return r;
   const near = /\b(near me|nearby|near by|around me|in my area)\b/i;

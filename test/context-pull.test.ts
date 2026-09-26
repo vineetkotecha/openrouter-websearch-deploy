@@ -53,3 +53,22 @@ it("skips mandate generation as well as provider calls for an unlocated local qu
  const out:any=await new SearchHarness({ SEARCH_TIMEOUT_MS:1000 } as any,w,[],new MemoryStore()).search(req({query:"pharmacy near me open now"}));
  expect(out.status).toBe("complete");expect(out.results).toEqual([]);expect(calls).toBe(0);
 });
+
+describe('alias-safe caller fill',()=>{
+  it('asks for one canonical location key and accepts an answered alias',async()=>{
+    const w:any={write:async(r:any)=>({...await writer.write(r),gaps:[{key:'user_current_location',material:true,question:'Where is the user now?'}]})};
+    const harness=new SearchHarness({SEARCH_TIMEOUT_MS:1000} as any,w,[fake as any],new MemoryStore(),{fetcher:okFetch});
+    const ask:any=await harness.search(req({query:'pharmacy near me open now',permissions:{may_pull_context:true}}));
+    expect(ask.requested_context.map((x:any)=>x.key)).toEqual(['location']);
+    const filled:any=await harness.search(req({query:'pharmacy near me open now',permissions:{may_pull_context:true},context:[{key:'user_current_location',value:'Pune',source:'caller'}]}));
+    expect(filled.status).toBe('complete');
+  });
+});
+
+describe('visible evidence limits',()=>{it('states unverified freshness instead of silent limitations',async()=>{
+ const provider={name:'exa',enabled:()=>true,search:async()=>[{provider:'exa',url:'https://a.example.com/story',title:'old story',snippet:'old story'}]};
+ const harness=new SearchHarness({SEARCH_TIMEOUT_MS:1000} as any,writer,[provider as any],new MemoryStore(),{fetcher:okFetch});
+ const out:any=await harness.search(req({query:'latest news on batteries'}));
+ expect(out.status).toBe('complete');expect(out.limitations.join(' ')).toMatch(/Freshness/);
+ expect(out.limitations.join(' ')).toMatch(/Freshness/);
+});});

@@ -9,15 +9,21 @@ export async function normalizeModelMandate(raw:any,r:SearchRequest,promptVersio
   if(!raw||typeof raw!=="object"||!Array.isArray(raw.factors))throw new Error("model mandate missing factors");
   const defaultFactor=(key:string,description:string,value:unknown,weight:number,hard=false)=>({key,class:"functional" as const,description,value,weight,confidence:1,hard,evidence:[{source:"query" as const,reference:hard?`hard_constraints.${key}`:"query"}]});
   const base={category:r.category_hint??"general_consumer_search",factors:[...Object.entries(r.hard_constraints).map(([k,v])=>defaultFactor(k,`Require ${k}.`,v,1,true)),defaultFactor("query_relevance","Match the explicit search objective.",r.query,1),defaultFactor("result_directness","Prefer direct results.",r.query,.8),defaultFactor("source_support","Prefer checkable source support.","verifiable",.7),defaultFactor("result_specificity","Prefer specific usable results.",r.query,.65),defaultFactor("current_accessibility","Prefer accessible results.",true,.55)]};const valid:any[]=[];
-  const permitted=new Set([...Object.keys(r.hard_constraints),...r.context.map(c=>c.key),...r.agent_understanding?.psychological_parameters.map(c=>c.key)??[]]);
+  const provenance=(e:any,f:any)=>{
+    if(e.source==='query')return e.reference==='query'||e.reference==='locale'||(typeof e.reference==='string'&&r.query.toLowerCase().includes(e.reference.toLowerCase()));
+    if(e.source==='caller')return e.reference==='locale'||Object.keys(r.hard_constraints).some(k=>e.reference===`hard_constraints.${k}`)||r.context.some(c=>c.source==='caller'&&e.reference===`context.${c.key}`);
+    if(e.source==='human'||e.source==='prior_outcome')return r.context.some(c=>c.source===e.source&&c.key===f.key&&c.evidence?.some(z=>z.source===e.source&&z.reference===e.reference))||r.agent_understanding?.psychological_parameters.some(p=>p.key===f.key&&p.evidence.some(z=>z.source===e.source&&z.reference===e.reference))||false;
+    return false;
+  };
   for(const f of raw.factors.slice(0,50)){
     if(!f||typeof f!=="object"||typeof f.key!=="string")continue;
     const psychological=f.class==="psychological";
     const supplied=psychological&&(r.agent_understanding?.psychological_parameters.some(p=>p.key===f.key)||r.context.some(c=>c.key===f.key&&c.class==="psychological"&&!!c.evidence?.length));
     if(psychological&&!supplied)continue;
-    const evidence=Array.isArray(f.evidence)?f.evidence.filter((e:any)=>e&&sources.has(e.source)&&(!e.reference||typeof e.reference==="string")):[];
+    const evidence=Array.isArray(f.evidence)?f.evidence.filter((e:any)=>e&&sources.has(e.source)&&(typeof e.reference==="string"?provenance(e,f):e.source==="query"&&!psychological)):[];
     if(!evidence.length)continue;
-    const next={...f,evidence,hard:psychological?false:f.hard};
+    const explicitHard=Object.prototype.hasOwnProperty.call(r.hard_constraints,f.key)||evidence.some((e:any)=>e.source==='query'&&e.reference!=='query'&&typeof e.reference==='string'&&r.query.toLowerCase().includes(e.reference.toLowerCase())&&/\b(?:only|under|without|must|no|within|before|after|latest|peer-reviewed)\b/i.test(e.reference));
+    const next={...f,evidence,hard:psychological?false:!!f.hard&&explicitHard};
     const parsed=MandateSchema.shape.factors.element.safeParse(next);
     if(parsed.success)valid.push(parsed.data);
   }
