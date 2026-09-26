@@ -35,3 +35,10 @@ describe("retention permission at the storage boundary",()=>{
   expect(r.status).toBe("complete");expect(asked).toBe(0);expect(store.episodes.size).toBe(0);
  });
 });
+
+
+it('traces decision and learning as pending rather than inventing a user action',async()=>{
+ const stages:any[]=[];const h=new SearchHarness(c,new HeuristicMandateWriter(),[],new MemoryStore());
+ const out:any=await h.search(SearchRequestSchema.parse({...base,query:'battery patents'}),{trace:(stage,data)=>stages.push({stage,data})});
+ expect(out.status).toBe('complete');expect(stages.at(-1)).toMatchObject({stage:'12_decision_learning',data:{storage:'not_retained',outcome:'not_submitted',learning_update:'not_run'}});
+});

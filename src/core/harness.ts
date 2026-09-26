@@ -152,7 +152,9 @@ export class SearchHarness {
     };
     meta?.trace?.('11_response',response);
     // Storage must never fail a search: record the failure and still return results.
-    if (request.permissions.may_retain) await Promise.resolve().then(() => this.store.save({ id: episode_id, tenantId: request.tenant_id, request, response, mandate, principal: meta?.principal, surface: meta?.surface, startedAt, expiresAt: new Date(Date.now() + 30 * 864e5) })).catch(e => { console.error("episode save failed", String((e as Error)?.message ?? e).slice(0, 200)); response.limitations.push("History and usage were not recorded for this search."); });
+    let stored=false;
+    if (request.permissions.may_retain) await Promise.resolve().then(() => this.store.save({ id: episode_id, tenantId: request.tenant_id, request, response, mandate, principal: meta?.principal, surface: meta?.surface, startedAt, expiresAt: new Date(Date.now() + 30 * 864e5) })).then(()=>{stored=true}).catch(e => { console.error("episode save failed", String((e as Error)?.message ?? e).slice(0, 200)); response.limitations.push("History and usage were not recorded for this search."); });
+    meta?.trace?.('12_decision_learning',{episode_id,storage:stored?'retained':'not_retained',outcome:'not_submitted',may_learn:request.permissions.may_learn,learning_update:'not_run',reason:stored?'Waiting for a later caller outcome event.':'No stored episode for a later outcome; no learning update.'});
     return response;
   }
 }
