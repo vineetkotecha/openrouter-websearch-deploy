@@ -19,3 +19,13 @@ it("keeps the human-readable support reason aligned with the graded state",()=>{
  const r=rank({intent:"battery patent",factors:[]} as any,[{provider:"test",url:"https://patents.example/a",title:"Battery patent",snippet:"A battery patent with detailed claims",raw:{verified_content:true,faithfulness:{state:"partial",score:.72}}}]);
  expect(r[0]?.faithfulness.state).toBe("partial");expect(r[0]?.reason).toContain("source support is partial");
 });
+
+
+describe("source-quality ordering",()=>{
+ it("ranks a closely relevant extracted, supported source above an unverified provider snippet",()=>{
+  const m:any={intent:"battery patent",factors:[]};
+  const x=(url:string,title:string,faithfulness?:{state:string,score:number})=>({provider:"test",url,title,snippet:title,score:.5,raw:faithfulness?{verified_content:true,faithfulness}:undefined});
+  const out=rank(m,[x("https://a.test","battery patent invention process"),x("https://b.test","battery patent",{state:"supported",score:.9})]);
+  expect(out[0]?.url).toBe("https://b.test");
+ });
+});

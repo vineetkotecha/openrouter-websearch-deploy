@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { classifyMandate, planJobs, executePlan, ProviderHealth, scoreCandidates, deepResearchGate } from "../src/core/jobs.js";
+import { classifyMandate, planJobs, executePlan, ProviderHealth, scoreCandidates, deepResearchGate, budgetFor } from "../src/core/jobs.js";
 import { SearchHarness, MemoryStore } from "../src/core/harness.js";
 import { HeuristicMandateWriter } from "../src/core/mandate.js";
 import { SearchRequestSchema } from "../src/contracts/search.js";
@@ -168,4 +168,10 @@ describe("rejected keys", () => {
     t = 61 * 60_000; expect(h.authRejected("serper")).toBe(false);
     h.record("tavily", false, "tavily HTTP 500"); expect(h.authRejected("tavily")).toBe(false);
   });
+});
+
+
+it("extracts five discovery survivors by default within the existing token budget",async()=>{
+ const r=req("patents filed for solid state batteries");const c=classifyMandate(r,await writer.write(r));
+ const b=budgetFor(r,c);expect(b.max_extracts).toBe(5);expect(b.max_extract_chars*b.max_extracts).toBeLessThanOrEqual(b.token_budget*4);
 });

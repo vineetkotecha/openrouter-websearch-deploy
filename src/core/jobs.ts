@@ -132,9 +132,9 @@ export function budgetFor(r: SearchRequest, c: Classification): Budget {
   return {
     max_jobs: l.max_jobs ?? 3,
     max_providers_per_job: Math.min(2, l.max_provider_calls),
-    max_extracts: l.max_extracts ?? 3,
+    max_extracts: l.max_extracts ?? 5,
     token_budget: l.token_budget ?? 6000,
-    max_extract_chars: Math.floor(((l.token_budget ?? 6000) * 4) / Math.max(1, l.max_extracts ?? 3)),
+    max_extract_chars: Math.floor(((l.token_budget ?? 6000) * 4) / Math.max(1, l.max_extracts ?? 5)),
     allow_deep_research: l.allow_deep_research ?? c.synthesis_requested,
   };
 }
