@@ -107,3 +107,19 @@ describe('explicit two-pass provider query formation',()=>{
  expect(formProviderQuery(req({query:'pharmacy near me open now',context:[{key:'location',value:'Pune',source:'caller',confidence:.95}]}),'post_fill').provider_query).toBe('pharmacy in Pune open now');
  });
 });
+
+
+describe('weekend trip distinct origin',()=>{it('does not request a conflated origin-or-destination parameter',async()=>{
+ const w:any={write:async(r:any)=>({...await writer.write(r),gaps:[{key:'origin_or_destination',material:true,question:'Where from or to?'}]})};
+ const harness=new SearchHarness({SEARCH_TIMEOUT_MS:1000} as any,w,[],new MemoryStore());
+ const out:any=await harness.search(req({query:'weekend trip',permissions:{may_pull_context:true}}));
+ expect(out.requested_context.map((x:any)=>x.key)).toEqual(['origin']);
+})});
+
+
+it('answers broad Notion alternatives instead of requiring unspecified startup particulars',async()=>{
+ const w:any={write:async(r:any)=>({...await writer.write(r),gaps:[{key:'startup_specific_needs',material:true,question:'What particular integrations or budget?'}]})};
+ const harness=new SearchHarness({SEARCH_TIMEOUT_MS:1000} as any,w,[],new MemoryStore());
+ const out:any=await harness.search(req({query:'alternatives to Notion for a startup knowledge base',permissions:{may_pull_context:true}}));
+ expect(out.status).toBe('complete');
+});

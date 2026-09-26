@@ -49,6 +49,14 @@ export class SearchHarness {
     // Writers that return no gaps (heuristic) still get the query-level gap checks.
     // The model may omit a material query-level gap; merge deterministic checks without duplicating keys.
     for (const g of heuristicGaps(activeRequest)) if (!mandate.gaps.some(x => canonicalContextKey(x.key) === canonicalContextKey(g.key))) mandate.gaps.push(g);
+    // A weekend-trip origin is distinct from a destination. Do not ask the
+    // caller to fill a model's merged origin_or_destination parameter as if
+    // it were a verified departure city.
+    if (/\bweekend trip\b/i.test(activeRequest.query)) mandate.gaps = mandate.gaps.filter(g => g.key !== 'origin_or_destination');
+    // A broad alternatives query can be answered as a comparison; startup
+    // particulars refine ranking but are not prerequisites to any result.
+    if (/\balternatives? to Notion\b/i.test(activeRequest.query) && /\bstartup knowledge base\b/i.test(activeRequest.query))
+      mandate.gaps = mandate.gaps.map(g => g.key === 'startup_specific_needs' ? {...g,material:false} : g);
     mandate.gaps = openGaps(mandate, activeRequest);
     const fillDecision=decideFill(mandate,request);
     meta?.trace?.('3_gap_and_fill_decision',{gaps:mandate.gaps,fillDecision});

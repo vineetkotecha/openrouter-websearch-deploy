@@ -46,3 +46,11 @@ it('keeps discussion and video pages behind merchant candidates on purchase-inte
  const out=rank(m,[x('https://www.quora.com/Best-running-shoes','Best running shoes under 3000','supported'),x('https://www.reddit.com/r/running','Running shoes under 3000 discussion','unverified'),x('https://www.myntra.com/sports-shoes-under-3000','Buy sports shoes under 3000','unverified')]);
  expect(out[0]?.url).toContain('myntra.com');expect(out.find(v=>v.url.includes('quora.com'))?.faithfulness.state).toBe('supported');
 });
+
+
+it('gates discussions for purchase intent in query-backed factors even when model intent paraphrases away purchase',()=>{
+ const m:any={intent:'Find running shoes that meet specific budget and geographical availability requirements.',category:'products',factors:[{key:'price_maximum',class:'functional',description:'Price under ₹3000',value:3000,weight:1,confidence:1,evidence:[{source:'query',reference:'under ₹3000'}]},{key:'geographic_availability_country',class:'functional',description:'Must be available for purchase in India',value:'India',weight:1,confidence:1,evidence:[{source:'query',reference:'available in India'}]}]};
+ const x=(url:string,title:string,state:'supported'|'unverified')=>({provider:'serper',url,title,snippet:title,score:.5,raw:{faithfulness:{state,score:state==='supported'?1:.2}}});
+ const result=rank(m,[x('https://www.quora.com/q','Best running shoes below 3000 INR','supported'),x('https://www.reddit.com/r/running','Budget running shoes India','supported'),x('https://www.youtube.com/watch?v=2','Best running shoes under 3000','supported'),x('https://www.myntra.com/sports-shoes-under-3000','Buy sports shoes under 3000 in India','unverified')]);
+ expect(result[0]?.url).toContain('myntra.com');expect(result.find(y=>y.url.includes('quora.com'))?.faithfulness.state).toBe('supported');
+});
