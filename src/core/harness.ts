@@ -39,7 +39,7 @@ export class SearchHarness {
       const response: SearchResponse = { status: "complete", episode_id, results: [], route: [],
         limitations: ["Location is required to answer this local search; no location was supplied, so no providers were called."],
         route_decision: { task_class: "local_shopping_maps", policy: "location-required", candidates: [], selected: [] } };
-      await Promise.resolve().then(() => this.store.save({ id: episode_id, tenantId: request.tenant_id, request, response, principal: meta?.principal, surface: meta?.surface, startedAt, expiresAt: new Date(Date.now() + 30 * 864e5) })).catch(() => { response.limitations.push("History and usage were not recorded for this search."); });
+      if (request.permissions.may_retain) await Promise.resolve().then(() => this.store.save({ id: episode_id, tenantId: request.tenant_id, request, response, principal: meta?.principal, surface: meta?.surface, startedAt, expiresAt: new Date(Date.now() + 30 * 864e5) })).catch(() => { response.limitations.push("History and usage were not recorded for this search."); });
       return response;
     }
     const mandate = await this.writer.write(activeRequest);
@@ -51,7 +51,8 @@ export class SearchHarness {
     const gap = fillDecision.ask.length?mandate.gaps.find(g=>g.key===fillDecision.ask[0]!.key):mandate.gaps.find(g=>g.material);
     // Pull from the calling agent first; ask the human only if the caller cannot pull.
     if (fillDecision.ask.length && request.permissions.may_pull_context) { const first=mandate.gaps.find(g=>g.key===fillDecision.ask[0]!.key)!; const out=contextRequest(episode_id,first,request); out.requested_context=fillDecision.ask.map(x=>({key:x.key,why:x.reason+": "+x.question,accepted_sources:["caller","human","prior_outcome"],scope:request.permissions.scopes.length?request.permissions.scopes:["this_search"]}));out.question=fillDecision.ask.map(x=>x.question).join(" ");return out; }
-    if (gap?.question && request.permissions.may_ask_user && this.ask) {
+    // A resumable question persists the entire request, so it requires retention permission.
+    if (gap?.question && request.permissions.may_ask_user && request.permissions.may_retain && this.ask) {
       const pending = await this.ask({ episode_id, request, question: gap.question, gap: gap.key, principal: meta?.principal }).catch(() => null);
       if (pending) return { status: "needs_input", episode_id, question: gap.question, gap: gap.key, resume_token: pending.resume_token, expires_in: 86400 };
     }
@@ -62,7 +63,7 @@ export class SearchHarness {
       const response: SearchResponse = { status: "complete", episode_id, results: [], route: [],
         limitations: ["Location is required to answer this local search; no location was supplied, so no providers were called."],
         route_decision: { task_class: "local_shopping_maps", policy: "location-required", candidates: [], selected: [] } };
-      await Promise.resolve().then(() => this.store.save({ id: episode_id, tenantId: request.tenant_id, request, response, mandate, principal: meta?.principal, surface: meta?.surface, startedAt, expiresAt: new Date(Date.now() + 30 * 864e5) })).catch(() => { response.limitations.push("History and usage were not recorded for this search."); });
+      if (request.permissions.may_retain) await Promise.resolve().then(() => this.store.save({ id: episode_id, tenantId: request.tenant_id, request, response, mandate, principal: meta?.principal, surface: meta?.surface, startedAt, expiresAt: new Date(Date.now() + 30 * 864e5) })).catch(() => { response.limitations.push("History and usage were not recorded for this search."); });
       return response;
     }
     // Jev (when configured) nominates the first discovery provider; the job planner keeps
@@ -131,7 +132,7 @@ export class SearchHarness {
       },
     };
     // Storage must never fail a search: record the failure and still return results.
-    await Promise.resolve().then(() => this.store.save({ id: episode_id, tenantId: request.tenant_id, request, response, mandate, principal: meta?.principal, surface: meta?.surface, startedAt, expiresAt: new Date(Date.now() + 30 * 864e5) })).catch(e => { console.error("episode save failed", String((e as Error)?.message ?? e).slice(0, 200)); response.limitations.push("History and usage were not recorded for this search."); });
+    if (request.permissions.may_retain) await Promise.resolve().then(() => this.store.save({ id: episode_id, tenantId: request.tenant_id, request, response, mandate, principal: meta?.principal, surface: meta?.surface, startedAt, expiresAt: new Date(Date.now() + 30 * 864e5) })).catch(e => { console.error("episode save failed", String((e as Error)?.message ?? e).slice(0, 200)); response.limitations.push("History and usage were not recorded for this search."); });
     return response;
   }
 }

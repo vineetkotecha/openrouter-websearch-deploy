@@ -4,7 +4,7 @@ describe("contracts",()=>{it("rejects tenantless requests",()=>{expect(SearchReq
 
 describe("agent understanding",()=>{it("accepts only typed user-agent psychological context",()=>{const x=SearchRequestSchema.parse({...base,agent_understanding:{source:"user_agent",deliberation_style:"concise",psychological_parameters:[{key:"time_scarcity",value:"high",confidence:.9,evidence:[{source:"caller",reference:"agent profile"}]}]}});expect(x.agent_understanding?.source).toBe("user_agent")});it("rejects any other source company",()=>{expect(SearchRequestSchema.safeParse({...base,agent_understanding:{source:"simulation",deliberation_style:"concise",psychological_parameters:[]}}).success).toBe(false)})});
 
-describe("one question",()=>{it("asks once when allowed and a material gap has a question, then never when not allowed",async()=>{const w:any={write:async()=>({id:"00000000-0000-4000-8000-000000000000",version:2,prompt_version:"t",intent:"x",category:"x",factors:[],gaps:[{key:"budget",material:true,question:"What is your budget?"}]})};const h=new SearchHarness(c,w,[],new MemoryStore());let asked=0;h.ask=async()=>{asked++;return{resume_token:"dvr_x"}};const r:any=await h.search(SearchRequestSchema.parse({...base,permissions:{...base.permissions,may_ask_user:true}}));expect(r.status).toBe("needs_input");expect(r.question).toBe("What is your budget?");const r2:any=await h.search(SearchRequestSchema.parse(base));expect(r2.status).toBe("complete");expect(asked).toBe(1)})});
+describe("one question",()=>{it("asks once when allowed and a material gap has a question, then never when not allowed",async()=>{const w:any={write:async()=>({id:"00000000-0000-4000-8000-000000000000",version:2,prompt_version:"t",intent:"x",category:"x",factors:[],gaps:[{key:"budget",material:true,question:"What is your budget?"}]})};const h=new SearchHarness(c,w,[],new MemoryStore());let asked=0;h.ask=async()=>{asked++;return{resume_token:"dvr_x"}};const r:any=await h.search(SearchRequestSchema.parse({...base,permissions:{...base.permissions,may_ask_user:true,may_retain:true}}));expect(r.status).toBe("needs_input");expect(r.question).toBe("What is your budget?");const r2:any=await h.search(SearchRequestSchema.parse(base));expect(r2.status).toBe("complete");expect(asked).toBe(1)})});
 
 import { SearchHarness as _SH } from "../src/core/harness.js";
 import { HeuristicMandateWriter as _HW } from "../src/core/mandate.js";
@@ -13,6 +13,25 @@ import { it as _it, expect as _ex } from "vitest";
 _it("a storage failure never fails the search", async () => {
   const store: any = { save: async () => { throw new Error("fk violation"); } };
   const h = new _SH({ SEARCH_TIMEOUT_MS: 1000 } as any, new _HW(), [{ name: "exa", enabled: () => true, search: async () => [{ provider: "exa", url: "https://a.example.com/1", title: "t", snippet: "s" }] } as any], store, { fetcher: (async () => ({ ok: false })) as any });
-  const out: any = await h.search(_SRS.parse({ tenant_id: "production", query: "test query" }));
+  const out: any = await h.search(_SRS.parse({ tenant_id: "production", query: "test query", permissions:{may_retain:true} }));
   _ex(out.status).toBe("complete"); _ex(out.limitations.join(" ")).toMatch(/not recorded/);
+});
+
+
+describe("retention permission at the storage boundary",()=>{
+ it("does not persist a normal search without may_retain, but saves with consent",async()=>{
+  const store=new MemoryStore();const h=new SearchHarness(c,new HeuristicMandateWriter(),[],store);
+  await h.search(SearchRequestSchema.parse(base));expect(store.episodes.size).toBe(0);
+  await h.search(SearchRequestSchema.parse({...base,permissions:{...base.permissions,may_retain:true}}));expect(store.episodes.size).toBe(1);
+ });
+ it("does not persist an unlocated local request without consent",async()=>{
+  const store=new MemoryStore();const h=new SearchHarness(c,new HeuristicMandateWriter(),[],store);
+  await h.search(SearchRequestSchema.parse({...base,query:"pharmacy near me open now"}));expect(store.episodes.size).toBe(0);
+ });
+ it("does not create a stored resume request without retention consent",async()=>{
+  const store=new MemoryStore(),w:any={write:async()=>({id:"00000000-0000-4000-8000-000000000000",version:2,prompt_version:"t",intent:"x",category:"x",factors:[],gaps:[{key:"budget",material:true,question:"What is your budget?"}]})};
+  const h=new SearchHarness(c,w,[],store);let asked=0;h.ask=async()=>{asked++;return{resume_token:"dvr_x"}};
+  const r:any=await h.search(SearchRequestSchema.parse({...base,permissions:{...base.permissions,may_ask_user:true}}));
+  expect(r.status).toBe("complete");expect(asked).toBe(0);expect(store.episodes.size).toBe(0);
+ });
 });
