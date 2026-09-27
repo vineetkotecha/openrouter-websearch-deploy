@@ -1,13 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { decideFill } from "./parameter-fill.js";
 import { curateParameters, curatedRequest } from "./parameter-curation.js";
-import { fallbackIntentFormation } from "./intent-formation.js";
+import { fallbackIntentFormation, hotelPropertySearch } from "./intent-formation.js";
 import { jevRerank } from "./jev-rerank.js";
 import type { Config } from "../config.js";
 import type { ProviderResult, SearchRequest, SearchResponse } from "../contracts/search.js";
 import type { MandateWriter } from "./mandate.js";
 import type { SearchProvider } from "../providers/base.js";
 import { rank } from "./rank.js";
+import {gateResults} from "./eligibility.js";
 import { extractSurvivors } from "./verify.js";
 import { fillSummary } from "./fill.js";
 import { heuristicGaps, openGaps, canonicalContextKey, contextRequest, contextUsed, formProviderQuery, type ContextRequest } from "./context-pull.js";
@@ -120,14 +121,15 @@ export class SearchHarness {
     const providerRequest={...effective,query:formed.provider_query};
     const call = async (p: SearchProvider, job: PlannedJob) => {
       const ctl = new AbortController(), s = Date.now();
-      const t = setTimeout(() => ctl.abort(), deadline);
+      const providerDeadline = p.name === "serpapi" ? Math.min(deadline, 6000) : deadline;
+      const t = setTimeout(() => ctl.abort(), providerDeadline);
       const branch=job.id.startsWith("category_")?branchQueries[Number(job.id.slice(9))-1]:undefined;
       const base=branch?{...providerRequest,query:branch.query}:providerRequest;
       const req = job.id === "site_search" && plan.classification.domains.length
         ? { ...base, hard_constraints: { ...base.hard_constraints, include_domains: plan.classification.domains } }
         : base;
       try {
-        const results = await Promise.race([p.search({ request: req, mandate: finalMandate, signal: ctl.signal }), new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`${p.name} deadline exceeded`)), deadline + 250))]);
+        const results = await Promise.race([p.search({ request: req, mandate: finalMandate, signal: ctl.signal }), new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`${p.name} deadline exceeded`)), providerDeadline + 250))]);
         return { status: "ok", latency_ms: Date.now() - s, results };
       } catch (e) { return { status: e instanceof Error ? e.message : "error", latency_ms: Date.now() - s, results: [] as ProviderResult[] }; }
       finally { clearTimeout(t); }
@@ -140,14 +142,16 @@ export class SearchHarness {
     const known: ProviderResult[] = plan.classification.known_urls.map(url => ({ provider: "known_url", url, title: url, snippet: "" }));
     const pool = [...known, ...exec.results];
     // Staged gate: triage on snippets first, then extract only the survivors.
-    const triaged = rank(finalMandate, pool, Math.max(request.limits.max_results * 2, 10));
+    const earlyGate=gateResults(effective,finalMandate,pool);
+    const eligiblePool=earlyGate.retained.map(x=>x.result);
+    const triaged = rank(finalMandate, eligiblePool, Math.max(request.limits.max_results * 2, 10));
     const byCanon = new Map<string, ProviderResult>();
-    for (const x of pool) { if (!byCanon.has(x.url)) byCanon.set(x.url, x); }
+    for (const x of eligiblePool) { if (!byCanon.has(x.url)) byCanon.set(x.url, x); }
     const ordered = triaged.map(t => byCanon.get(t.url)!).filter(Boolean);
     const known_first = [...ordered.filter(x => x.provider === "known_url"), ...ordered.filter(x => x.provider !== "known_url")];
     meta?.trace?.('7_triage_and_dedupe',{pool_count:pool.length,triaged:triaged.map(x=>({rank:x.rank,url:x.url,title:x.title,mandate_fit:x.mandate_fit,faithfulness:x.faithfulness})),ordered_urls:known_first.map(x=>x.url)});
     const { results: extracted, report } = await extractSurvivors(known_first, undefined, { max: Math.max(plan.budget.max_extracts, known.length ? Math.min(known.length, 5) : 0), maxChars: plan.budget.max_extract_chars, tokenBudget: plan.budget.token_budget, fetcher: this.opts.fetcher, judge: this.opts.judge , fields: plan.classification.structured_fields});
-    const rest = pool.filter(x => !known_first.includes(x));
+    const rest = eligiblePool.filter(x => !known_first.includes(x));
     meta?.trace?.('8_extraction',{report,extracted:extracted.map(x=>({provider:x.provider,url:x.url,title:x.title,fields:x.fields})),untriaged_count:rest.length});
 
     const limitations: string[] = [];
@@ -166,6 +170,7 @@ export class SearchHarness {
     for(const k of fillDecision.stale) limitations.push(`Stale context ignored: ${k}.`);
     if ((mandate as any).fallback_reason) limitations.push(`Mandate writer fell back to heuristic (${(mandate as any).fallback_reason}).`);
     for (const n of plan.notes) if (/no .* provider live/i.test(n)) limitations.push(n);
+    if(hotelPropertySearch(effective))limitations.push("Hotel date-specific prices, room availability and discounts remain unverified unless backed by a dated booking quote.");
     if(report.failed_fetch)limitations.push(`${report.failed_fetch} of ${report.attempted} source pages could not be fetched; their claims were not verified.`);
     if(report.unverified)limitations.push(`${report.unverified} extracted sources remained unverified.`);
     if(/\b(?:Jain|without onion|without garlic|no onion|no garlic)\b/i.test(request.query))limitations.push('Ingredient lists and preparation were not independently checked for Jain or onion/garlic restrictions; verify the full recipe before use.');
@@ -173,13 +178,15 @@ export class SearchHarness {
     if(/\b(?:buy|available|under [₹$€£]|price)\b/i.test(request.query))limitations.push('Current price, stock and purchasability were not verified against a merchant listing.');
     if(/\b(?:latest|open now|today|current)\b/i.test(request.query))limitations.push('Freshness, current hours or publication date were not independently verified.');
     const firstJob = plan.jobs[0];
-    const initialRank=rank(finalMandate, [...extracted, ...rest], request.limits.max_results);
+    const lateGate=gateResults(effective,finalMandate,[...extracted, ...rest]);
+    const verification=new Map(lateGate.retained.map(x=>[x.result.url,x.verification]));
+    const initialRank=rank(finalMandate, lateGate.retained.map(x=>x.result), request.limits.max_results);
     meta?.trace?.('9_initial_rank',initialRank);
     const reranked=await jevRerank(effective,finalMandate,initialRank);
     meta?.trace?.('10_jev_rerank',reranked);
     const response: SearchResponse = {
       status: "complete", episode_id,
-      results: reranked.results.map(x=>({...x,citations:[{url:x.url,claim:x.title,support:x.faithfulness.state,kind:"source_claim" as const}]})),
+      results: reranked.results.map(x=>({...x,verification:verification.get(x.url)??{},citations:[{url:x.url,claim:x.title,support:x.faithfulness.state,kind:"source_claim" as const}]})),
       route: exec.runs.map(x => ({ provider: x.provider, latency_ms: x.latency_ms, status: x.status, result_count: x.result_count })),
       limitations,
       route_decision: {
@@ -193,7 +200,7 @@ export class SearchHarness {
         version: 1, query_class: plan.classification.query_class, ladder: plan.classification.ladder, signals: plan.classification.signals,
         budget: plan.budget, jobs: plan.jobs.map(j => ({ id: j.id, kind: j.kind, primary: j.primary, fallback: j.fallback, reason: j.reason, priority:j.priority, factor_keys:j.factor_keys, candidates: j.candidates })),
         runs: exec.runs, fallback_used: exec.fallback_used, escalated: exec.escalated, skipped: exec.skipped,
-        known_urls: plan.classification.known_urls, extraction: report, context: contextUsed(effective), curation:curated, formation:{first:firstPass.formed_query,post:formed.provider_query,revision_of:request.curation_revision_of,used_keys:formed.context_keys}, gaps: mandate.gaps.map(g => ({ key: g.key, material: g.material })), fill: plan.classification.structured_fields.length ? fillSummary(plan.classification.structured_fields, extracted.map(x => (x as any).fields)) : undefined, notes: [...plan.notes,...fillDecision.defaults.map(x=>`default:${x.key} - ${x.reason}`),`jev_rerank: ${reranked.successful}/${reranked.attempted}; ${reranked.reason}; ${reranked.latency_ms} ms; tokens ${reranked.usage.input_tokens}/${reranked.usage.output_tokens}`],
+        known_urls: plan.classification.known_urls, extraction: report, context: contextUsed(effective), curation:curated, eligibility:{excluded:[...earlyGate.excluded,...lateGate.excluded],retained:lateGate.retained.length}, formation:{first:firstPass.formed_query,post:formed.provider_query,revision_of:request.curation_revision_of,used_keys:formed.context_keys}, gaps: mandate.gaps.map(g => ({ key: g.key, material: g.material })), fill: plan.classification.structured_fields.length ? fillSummary(plan.classification.structured_fields, extracted.map(x => (x as any).fields)) : undefined, notes: [...plan.notes,...fillDecision.defaults.map(x=>`default:${x.key} - ${x.reason}`),`jev_rerank: ${reranked.successful}/${reranked.attempted}; ${reranked.reason}; ${reranked.latency_ms} ms; tokens ${reranked.usage.input_tokens}/${reranked.usage.output_tokens}`],
       },
     };
     meta?.trace?.('11_response',response);

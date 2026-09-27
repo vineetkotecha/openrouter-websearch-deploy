@@ -1,6 +1,7 @@
 // Calling-agent context pull (product doc v1: "pull context from the calling agent before asking
 // the human"). The harness never reaches into other systems itself: it names the context it is
 // missing, why, and under which scope, and the calling agent decides what to send back.
+import { hotelPropertySearch } from "./intent-formation.js";
 import type { Mandate, SearchRequest } from "../contracts/search.js";
 
 export type ContextRequest = {
@@ -88,6 +89,15 @@ export function formProviderQuery(r: SearchRequest, phase: "pre_fill" | "post_fi
     }
     if(values.has("origin")&&/\bweekend trip\b/i.test(query)&&!query.toLowerCase().includes(values.get("origin")!.toLowerCase())) {query+=` from ${values.get("origin")}`;used.push("origin")}
     if(values.has("use_case")&&/\bbest laptop\b/i.test(query)&&!query.toLowerCase().includes(values.get("use_case")!.toLowerCase())) {query+=` for ${values.get("use_case")}`;used.push("use_case")}
+  }
+  if(hotelPropertySearch(r)) {
+    // The answer is a hotel, not a collection of hotels. Keep constraints as
+    // terms rather than sending a conversational instruction to the index.
+    const place=r.query.match(/\b(?:in|around|near)\s+([\p{L}\s]+?)(?=\s+(?:for|on|under|below|with|one|this|tonight|tomorrow|\d)|[,.;]|$)/iu)?.[1]?.trim();
+    const cap=r.query.match(/(?:under|below|within|up to|maximum|max)\s*(?:[₹$€£]|rs\.?\s*)?\s*([\d,]+(?:\s*[-–]\s*[\d,]+)?)/i)?.[1];
+    const date=r.query.match(/\b(?:on|for|night of|one night)\s+(?:the\s+)?(\d{1,2}(?:st|nd|rd|th)?\s+(?:Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?|Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?)(?:\s+\d{4})?)/i)?.[1];
+    query=["hotel property",place,cap?`under ₹${cap.replace(/\s/g,"")}`:undefined,date, /\b3\s*star\b/i.test(r.query)?"3 star":undefined,"rooms rates reviews"].filter(Boolean).join(" ");
+    used.push("answer_unit:hotel_property");
   }
   return {phase,original_query:r.query,provider_query:query,context_keys:used,changed:query!==r.query};
 }

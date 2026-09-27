@@ -46,7 +46,7 @@ export const CAPABILITIES: Record<string, Capability> = {
 
 // Cohort primaries per class (playbook section 7). A small bonus, not a hard rule.
 const COHORT_PRIMARY: Partial<Record<QueryClass, string[]>> = {
-  semantic_discovery: ["exa"], keyword_web: ["tavily", "brave"], news_fresh: ["tavily", "brave"], local_shopping_maps: ["serpapi"],
+  semantic_discovery: ["exa"], keyword_web: ["tavily", "brave"], news_fresh: ["tavily", "brave"], local_shopping_maps: ["serper"],
   site_extract: ["firecrawl"], site_map_crawl: ["firecrawl"], structured_json: ["linkup"], entity_kg: ["diffbot"],
   premium_domain: ["valyu"], deep_research: ["parallel"], grounded_answer: ["perplexity", "parallel"],
 };
@@ -204,6 +204,7 @@ export function scoreCandidates(kind: JobKind, c: Classification, r: SearchReque
     else if (allow.size && !allow.has(name)) excluded = "policy: not in provider_allowlist";
     else if (blocked.has(name)) excluded = "policy: excluded by hard constraint";
     else if (!health.quotaLeft(name)) excluded = "quota exhausted";
+    else if (health.recentErrors(name) >= 1) excluded = "recent repeated failures";
     else if (health.authRejected(name)) excluded = "key rejected (401/403) in the last hour";
     else if (!cap.kinds.includes(kind)) excluded = `no ${kind} capability`;
     else if (fit === 0) excluded = `no fit for ${c.query_class}`;
