@@ -48,6 +48,14 @@ export async function normalizeModelMandate(raw:any,r:SearchRequest,promptVersio
     const parsed=MandateSchema.shape.factors.element.safeParse(next);
     if(parsed.success)valid.push(parsed.data);
   }
+  // The raw query, not the model's changing factor shape, owns an explicit RAM gate.
+  // Replace the corresponding model factor so ranking does not see two RAM rules.
+  const ram=r.query.match(/\bwith\s+(\d+(?:\.\d+)?)\s*(GB|TB|MB)\s+RAM\b/i);
+  if(ram){
+    const value=`${ram[1]}${ram[2]!.toUpperCase()}`;
+    for(let i=valid.length-1;i>=0;i--)if(valid[i].class==="functional"&&/^(?:ram|memory)(?:_|$)/i.test(valid[i].key))valid.splice(i,1);
+    valid.unshift({key:"ram",class:"functional",description:"Require the explicitly requested RAM capacity.",value,weight:1,confidence:1,hard:true,evidence:[{source:"query",reference:ram[0]}]});
+  }
   const keys=new Set(valid.map(f=>f.key));
   const factors=[...valid];
   // Hard constraints from request override any model interpretation.
