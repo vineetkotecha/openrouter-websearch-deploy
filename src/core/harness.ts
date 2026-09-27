@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { decideFill } from "./parameter-fill.js";
 import { curateParameters, curatedRequest } from "./parameter-curation.js";
+import { fallbackIntentFormation } from "./intent-formation.js";
 import { jevRerank } from "./jev-rerank.js";
 import type { Config } from "../config.js";
 import type { ProviderResult, SearchRequest, SearchResponse } from "../contracts/search.js";
@@ -44,10 +45,12 @@ export class SearchHarness {
       return response;
     }
     meta?.trace?.('1_request', {query:request.query, tenant_id:request.tenant_id, context:contextUsed(activeRequest),permissions:request.permissions,limits:request.limits});
-    meta?.trace?.('1a_prefill_query_formation',formProviderQuery(activeRequest,"pre_fill"));
-    const firstPass = curateParameters(activeRequest, undefined, request.curation_revision_of);
+    const intent=await this.writer.form?.(activeRequest)??fallbackIntentFormation(activeRequest);
+    meta?.trace?.('1a_prefill_query_formation',{...formProviderQuery(activeRequest,"pre_fill"),intent});
+    const firstPass = curateParameters(activeRequest, undefined, request.curation_revision_of,intent);
     meta?.trace?.('1b_parameter_curation_first_pass', firstPass);
     const mandate = await this.writer.write(curatedRequest(activeRequest,firstPass));
+    if(intent.strategy==="across_categories")mandate.category="general_consumer_search";
     meta?.trace?.('2_mandate_writer', mandate);
     // Writers that return no gaps (heuristic) still get the query-level gap checks.
     // The model may omit a material query-level gap; merge deterministic checks without duplicating keys.
@@ -61,14 +64,15 @@ export class SearchHarness {
     if (/\balternatives? to Notion\b/i.test(activeRequest.query) && /\bstartup knowledge base\b/i.test(activeRequest.query))
       mandate.gaps = mandate.gaps.map(g => g.key === 'startup_specific_needs' ? {...g,material:false} : g);
     mandate.gaps = openGaps(mandate, activeRequest);
-    const curated=curateParameters(activeRequest,mandate,request.curation_revision_of);
+    const curated=curateParameters(activeRequest,mandate,request.curation_revision_of,intent);
     const effective=curatedRequest(activeRequest,curated);
     const finalMandate = curated.conflicts.length || effective.context.length!==activeRequest.context.length ? await this.writer.write(effective) : mandate;
+    if(intent.strategy==="across_categories")finalMandate.category="general_consumer_search";
     finalMandate.gaps=mandate.gaps;
     meta?.trace?.('3b_mandate_post_curation',{id:finalMandate.id,revision_of:request.curation_revision_of,conflicts:curated.conflicts,changed_factors:{removed:mandate.factors.filter(x=>!finalMandate.factors.some(y=>y.key===x.key&&y.class===x.class)).map(x=>x.key),added:finalMandate.factors.filter(x=>!mandate.factors.some(y=>y.key===x.key&&y.class===x.class)).map(x=>x.key)}});
-    // Only a constrained set of decision-changing gaps may block. A model-only
+    // Only supported decision-changing gaps may block. A model-only
     // suggestion remains a declared optional default, never an invented question.
-    mandate.gaps=mandate.gaps.map(g=>({...g,material:g.material && curated.parameters.some(p=>p.key===canonicalContextKey(g.key)&&p.material)}));
+    mandate.gaps=mandate.gaps.map(g=>({...g,material:g.material && curated.parameters.some(p=>p.key===canonicalContextKey(g.key)&&p.compulsory)}));
     const fillDecision=decideFill(mandate,request);
     for (const c of request.context) if(!activeRequest.context.includes(c) && !fillDecision.stale.includes(c.key))fillDecision.stale.push(c.key);
     meta?.trace?.('3a_curated_parameter_manifest',curated);
@@ -78,7 +82,7 @@ export class SearchHarness {
     if (fillDecision.ask.length && request.permissions.may_pull_context && !request.caller_fill_complete) { const first=mandate.gaps.find(g=>g.key===fillDecision.ask[0]!.key)!; const out=contextRequest(episode_id,first,request); out.requested_context=fillDecision.ask.map(x=>({key:x.key,why:x.reason+": "+x.question,accepted_sources:["caller","human","prior_outcome"],scope:request.permissions.scopes.length?request.permissions.scopes:["this_search"]}));out.question=fillDecision.ask.map(x=>x.question).join(" ");out.curation_id=curated.id;out.remaining_user_question="If you cannot answer these from permitted context, ask the user once for the unresolved material facts; then search again with evidenced answers and curation_revision_of. Do not guess.";meta?.trace?.('4_context_request',out);return out; }
     // A resumable question persists the entire request, so it requires retention permission.
     if (gap?.question && gap.material && request.permissions.may_ask_user && request.permissions.may_retain && this.ask) {
-      const remaining=mandate.gaps.filter(g=>g.material&&g.question).slice(0,3);
+      const remaining=mandate.gaps.filter(g=>g.material&&g.question);
       const question=remaining.map(g=>g.question).join(" ");
       const pending = await this.ask({ episode_id, request, question, gap: gap.key, gaps:remaining.map(g=>g.key), principal: meta?.principal }).catch(() => null);
       if (pending) return { status: "needs_input", episode_id, question, gap: gap.key, gaps:remaining.map(g=>g.key), resume_token: pending.resume_token, expires_in: 86400 };
@@ -99,18 +103,29 @@ export class SearchHarness {
     const jevPick = decision.policy.startsWith("jev") ? decision.selected[0]?.provider_name : undefined;
     meta?.trace?.('4_policy_route',decision);
     const plan = planJobs(effective, finalMandate, this.providers, this.health, jevPick, curated);
+    const branchQueries=intent.strategy==="across_categories"&&!effective.context.some(c=>canonicalContextKey(c.key)==="intent_category")?intent.search_branches:[];
+    if(branchQueries.length){
+      const first=plan.jobs.find(j=>j.kind==="discovery");
+      if(first){
+        const allowed=Math.min(branchQueries.length,Math.max(1,plan.budget.max_jobs));
+        const branches=Array.from({length:allowed},(_,i)=>({...first,id:`category_${i+1}`,reason:`Explore ${branchQueries[i]!.category} without presuming a single category.`,priority:80}));
+        plan.jobs=[...branches,...plan.jobs.filter(j=>j!==first)].slice(0,plan.budget.max_jobs);
+      }else plan.notes.push("Ambiguous category: no discovery-capable job; category branches were not searched.");
+    }
     meta?.trace?.('5_job_plan',plan);
     const deadline = Math.min(this.c.SEARCH_TIMEOUT_MS, request.limits.latency_ms);
 
     const formed=formProviderQuery(effective,"post_fill");
-    meta?.trace?.('5a_postfill_query_formation',formed);
+    meta?.trace?.('5a_postfill_query_formation',{...formed,branches:branchQueries});
     const providerRequest={...effective,query:formed.provider_query};
     const call = async (p: SearchProvider, job: PlannedJob) => {
       const ctl = new AbortController(), s = Date.now();
       const t = setTimeout(() => ctl.abort(), deadline);
+      const branch=job.id.startsWith("category_")?branchQueries[Number(job.id.slice(9))-1]:undefined;
+      const base=branch?{...providerRequest,query:branch.query}:providerRequest;
       const req = job.id === "site_search" && plan.classification.domains.length
-        ? { ...providerRequest, hard_constraints: { ...providerRequest.hard_constraints, include_domains: plan.classification.domains } }
-        : providerRequest;
+        ? { ...base, hard_constraints: { ...base.hard_constraints, include_domains: plan.classification.domains } }
+        : base;
       try {
         const results = await Promise.race([p.search({ request: req, mandate: finalMandate, signal: ctl.signal }), new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`${p.name} deadline exceeded`)), deadline + 250))]);
         return { status: "ok", latency_ms: Date.now() - s, results };
@@ -136,6 +151,11 @@ export class SearchHarness {
     meta?.trace?.('8_extraction',{report,extracted:extracted.map(x=>({provider:x.provider,url:x.url,title:x.title,fields:x.fields})),untriaged_count:rest.length});
 
     const limitations: string[] = [];
+    if(branchQueries.length){
+      const attempted=exec.runs.filter(run=>run.job.startsWith("category_")).map(run=>branchQueries[Number(run.job.slice(9))-1]?.category).filter(Boolean);
+      limitations.push(attempted.length?`Category was not specified; searched across ${[...new Set(attempted)].join(", ")} rather than assuming one.`:"Category was ambiguous, but no provider could search the alternate categories; results may miss whole categories.");
+      if(attempted.length<branchQueries.length) limitations.push(`Search budget covered ${attempted.length} of ${branchQueries.length} plausible categories; other categories may be missing.`);
+    }
     const anyEnabled = this.providers.some(p => p.enabled());
     if (!anyEnabled && !known.length) limitations.push("No provider key is configured; returning an empty ranked set.");
     if (gap) limitations.push(`Missing context: ${gap.key}.`);

@@ -4,7 +4,7 @@ import { openGaps } from "./context-pull.js";
 // The first query pass asks the caller only for facts capable of changing the result set.
 // Retrieval from the permissioned, fresh context store runs before this function.
 export type FillDecision = { ask: { key:string; question:string; reason:string }[]; defaults: { key:string; reason:string }[]; stale: string[] };
-export function decideFill(m: Mandate, r: SearchRequest, maxQuestions=3): FillDecision {
+export function decideFill(m: Mandate, r: SearchRequest): FillDecision {
   const now=Date.now();
   const fresh=r.context.filter(c=>(!c.expires_at||Date.parse(c.expires_at)>now)&&!(c.observed_at&&/^(location|city|area|user_current_location)$/i.test(c.key)&&now-Date.parse(c.observed_at)>=15*60_000));
   const stale=r.context.filter(c=>(c.expires_at&&Date.parse(c.expires_at)<=now)||(c.observed_at&&/^(location|city|area|user_current_location)$/i.test(c.key)&&now-Date.parse(c.observed_at)>=15*60_000)).map(c=>c.key);
@@ -14,9 +14,9 @@ export function decideFill(m: Mandate, r: SearchRequest, maxQuestions=3): FillDe
   const seen=new Set<string>();
   for(const g of gaps){
     const key=g.key.toLowerCase();if(seen.has(key))continue;seen.add(key);
-    if(g.material&&g.question&&ask.length<maxQuestions&&r.permissions.may_pull_context){
+    if(g.material&&g.question&&r.permissions.may_pull_context){
       ask.push({key:g.key,question:g.question,reason:"Could change which results qualify or win"});
-    }else defaults.push({key:g.key,reason:g.material?"Material gap not asked within caller/batch limit; proceed with declared uncertainty":"Optional preference absent; do not infer it"});
+    }else defaults.push({key:g.key,reason:g.material?"Compulsory fact could not be asked with current permissions; proceed with declared uncertainty":"Optional preference absent; do not infer it"});
   }
   return {ask,defaults,stale};
 }

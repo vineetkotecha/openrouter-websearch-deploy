@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Mandate, SearchRequest } from "../contracts/search.js";
 import { canonicalContextKey, canonicalGaps, heuristicGaps } from "./context-pull.js";
+import type { IntentFormation } from "./intent-formation.js";
 
 export type CuratedParameter = {
   key: string; class: "functional" | "psychological"; value?: unknown;
@@ -9,12 +10,12 @@ export type CuratedParameter = {
   evidence: { source: string; reference?: string }[];
   confidence: number; observed_at?: string; expires_at?: string;
   allowed_uses: ("search" | "rerank" | "ask")[];
-  hard: boolean; material: boolean; priority: number; effect: "eligibility" | "retrieval" | "ranking";
+  hard: boolean; material: boolean; priority: number; criticality:number; compulsory:boolean; effect: "eligibility" | "retrieval" | "ranking";
   question?: string; alternatives?: { source: string; value: unknown }[];
 };
 export type CuratedParameterManifest = {
   id: string; version: 1; query: string; formed_query: string; created_at: string;
-  parameters: CuratedParameter[]; conflicts: string[]; revision_of?: string;
+  parameters: CuratedParameter[]; conflicts: string[]; revision_of?: string; intent?:IntentFormation; criticality_cutoff: number;
 };
 const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const nonempty = (v: unknown) => v !== undefined && v !== null && String(v).trim() !== "";
@@ -24,10 +25,10 @@ const humanOnly = (c: SearchRequest["context"][number]) => c.class === "psycholo
 const sensitive = (key:string) => /(?:religion|race|ethnic|gender|sexual|disability|health|medical|politic|age|income|credit|biometric)/i.test(key);
 // A direct quote or caller's own understanding with a reference is required for a human factor.
 // A query alone, an unreferenced profile, or a model hypothesis cannot create one.
-export function curateParameters(r: SearchRequest, m?: Mandate, revision_of?: string): CuratedParameterManifest {
+export function curateParameters(r: SearchRequest, m?: Mandate, revision_of?: string, intent?:IntentFormation): CuratedParameterManifest {
   const now = Date.now();
   const slots = new Map<string, CuratedParameter>();
-  const put = (p: CuratedParameter) => slots.set(`${p.class}:${p.key}`, p);
+  const put = (p: Omit<CuratedParameter,"criticality"|"compulsory">) => slots.set(`${p.class}:${p.key}`, {...p,criticality:p.material?80:p.effect==="ranking"?10:40,compulsory:p.material});
   for (const [raw, value] of Object.entries(r.hard_constraints)) {
     const key=canonicalContextKey(raw);
     put({key,class:"functional",value,state:"resolved",source:"query",evidence:[{source:"query",reference:`hard_constraints.${raw}`}],confidence:1,allowed_uses:["search","rerank"],hard:true,material:true,priority:100,effect:"eligibility"});
@@ -52,6 +53,17 @@ export function curateParameters(r: SearchRequest, m?: Mandate, revision_of?: st
     const key=canonicalContextKey(p.key);if(slots.has(`psychological:${key}`))continue;
     put({key,class:"psychological",value:p.value,state:"resolved",source:"caller",evidence:p.evidence,confidence:p.confidence,allowed_uses:["rerank"],hard:false,material:false,priority:10,effect:"ranking"});
   }
+  if(intent?.category_state==="ambiguous"&&!r.category_hint){
+    put({key:"intent_category",class:"functional",state:"missing",evidence:[],confidence:0,allowed_uses:["search","ask"],hard:false,material:false,priority:40,effect:"retrieval",question:`Which kind of result would you like? ${intent.intent_space.map(x=>x.category).join(", ")}?`});
+  }
+  for(const g of intent?.unknowns??[]){
+    if(slots.has(`functional:${g.key}`)||g.key==="intent_category")continue;
+    put({key:g.key,class:"functional",state:"missing",evidence:[],confidence:0,allowed_uses:["search","ask"],hard:false,material:false,priority:g.result_changing?55:20,effect:"retrieval",question:g.question});
+  }
+  for(const h of intent?.candidate_human_factors??[]){
+    if(slots.has(`psychological:${h.key}`))continue;
+    put({key:h.key,class:"psychological",state:"missing",evidence:[],confidence:0,allowed_uses:["rerank","ask"],hard:false,material:false,priority:10,effect:"ranking",question:h.question});
+  }
   // Model-authored values never become curated facts just because a broad query
   // phrase resembles their evidence. The mandate may use them as tentative
   // ranking hints; this manifest contains only explicit constraints/context.
@@ -59,10 +71,10 @@ export function curateParameters(r: SearchRequest, m?: Mandate, revision_of?: st
   for(const g of gaps){const key=canonicalContextKey(g.key),old=slots.get(`functional:${key}`);
     if(old?.state==="resolved" && !old.alternatives?.length)continue;
     if(old?.hard)continue;
-    if(old) {old.material=materialKeys.has(key) && g.material;old.question=g.question;continue;}
+    if(old) {old.material=materialKeys.has(key) && g.material;old.criticality=old.material?80:old.effect==="ranking"?10:40;old.compulsory=old.criticality>=70;old.question=g.question;continue;}
     put({key,class:"functional",state:"missing",evidence:[],confidence:0,allowed_uses:["search","ask"],hard:false,material:materialKeys.has(key)&&g.material,priority:materialKeys.has(key)&&g.material?80:20,effect:materialKeys.has(key)?"retrieval":"ranking",question:g.question});
   }
-  return {id:randomUUID(),version:1,query:r.query,formed_query:r.query,created_at:new Date().toISOString(),parameters:[...slots.values()].sort((a,b)=>b.priority-a.priority||a.key.localeCompare(b.key)),conflicts:[...slots.values()].filter(p=>p.state==="conflict").map(p=>p.key),revision_of};
+  return {criticality_cutoff:70,id:randomUUID(),version:1,query:r.query,formed_query:r.query,created_at:new Date().toISOString(),parameters:[...slots.values()].sort((a,b)=>b.priority-a.priority||a.key.localeCompare(b.key)),conflicts:[...slots.values()].filter(p=>p.state==="conflict").map(p=>p.key),revision_of,intent};
 }
 export function curatedRequest(r:SearchRequest, manifest:CuratedParameterManifest):SearchRequest {
   const selected=new Map(manifest.parameters.filter(p=>p.state==="resolved"&&!p.hard).map(p=>[`${p.class}:${p.key}`,p]));

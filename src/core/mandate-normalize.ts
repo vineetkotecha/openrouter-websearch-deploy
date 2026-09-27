@@ -50,6 +50,6 @@ export async function normalizeModelMandate(raw:any,r:SearchRequest,promptVersio
   if (/\b(?:latest|this week|today|breaking)\b/i.test(r.query) && !factors.some(f=>f.class==="functional" && f.hard && /(?:fresh|recent|week|latest|date|today|breaking)/i.test(`${f.key} ${f.description} ${String(f.value??"")}`))) {
     factors.unshift(defaultFactor("freshness","Require the explicit recency window in the query.",r.query,1,true));
   }
-  const gaps=Array.isArray(raw.gaps)?raw.gaps.filter((g:any)=>g&&typeof g.key==="string"&&/^[a-z][a-z0-9_]{0,63}$/.test(g.key)&&g.material===true&&typeof g.question==="string"&&g.question.trim().length>0&&g.question.length<=300).slice(0,3):[];
+  const gaps=Array.isArray(raw.gaps)?raw.gaps.filter((g:any)=>g&&typeof g.key==="string"&&/^[a-z][a-z0-9_]{0,63}$/.test(g.key)&&g.material===true&&typeof g.question==="string"&&g.question.trim().length>0&&g.question.length<=300):[];
   return MandateSchema.parse({id:randomUUID(),version:2,prompt_version:promptVersion,intent:typeof raw.intent==="string"&&raw.intent.trim()?raw.intent:r.query,category:typeof raw.category==="string"&&raw.category.trim()?raw.category:base.category,factors:factors.slice(0,50),gaps,policy:r.permissions,created_at:new Date().toISOString()});
 }

@@ -23,7 +23,7 @@ describe('source-grounded factors',()=>{it('preserves explicitly supplied psycho
 import { mandatePrompt } from '../src/prompts/mandate-writer-v2.js';
 describe('mandate gap instructions',()=>{it('distinguishes blocking context from optional refinements',()=>{
  const p=mandatePrompt('{"query":"quiet laptop for shared office with 16GB RAM"}');
- expect(p).toContain('A detail that could refine ranking is not automatically a material gap');
+ expect(p).toContain('A detail that only refines ranking is good to have');
  expect(p).toContain('near me');
 })});
 
