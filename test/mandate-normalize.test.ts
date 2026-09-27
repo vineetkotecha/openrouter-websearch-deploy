@@ -76,3 +76,13 @@ describe('material gap grounding',()=>{
   expect(x.gaps).toEqual([]);
  });
 });
+
+it('promotes the real Gemini structured RAM factor only on exact query support',async()=>{
+ const r=SearchRequestSchema.parse({tenant_id:'t',query:'quiet laptop for a shared office with 16GB RAM'});
+ const f={key:'ram_capacity_gb',class:'functional',description:'The laptop must have at least the specified amount of RAM.',value:{operator:'greater_than_or_equal_to',unit:'GB',value:16},weight:1,confidence:1,hard:true,evidence:[{source:'query',reference:'16GB RAM'}]};
+ const x=await normalizeModelMandate({factors:[f],gaps:[]},r,'test');
+ expect(x.factors.find(z=>z.key==='ram_capacity_gb')?.hard).toBe(true);
+ const other=SearchRequestSchema.parse({tenant_id:'t',query:'quiet laptop with 8GB RAM'});
+ const y=await normalizeModelMandate({factors:[{...f,evidence:[{source:'query',reference:'query'}]}],gaps:[]},other,'test');
+ expect(y.factors.find(z=>z.key==='ram_capacity_gb')?.hard).toBe(false);
+});
