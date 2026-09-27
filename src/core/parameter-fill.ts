@@ -6,8 +6,8 @@ import { openGaps } from "./context-pull.js";
 export type FillDecision = { ask: { key:string; question:string; reason:string }[]; defaults: { key:string; reason:string }[]; stale: string[] };
 export function decideFill(m: Mandate, r: SearchRequest, maxQuestions=3): FillDecision {
   const now=Date.now();
-  const fresh=r.context.filter(c=>!c.expires_at||Date.parse(c.expires_at)>now);
-  const stale=r.context.filter(c=>c.expires_at&&Date.parse(c.expires_at)<=now).map(c=>c.key);
+  const fresh=r.context.filter(c=>(!c.expires_at||Date.parse(c.expires_at)>now)&&!(c.observed_at&&/^(location|city|area|user_current_location)$/i.test(c.key)&&now-Date.parse(c.observed_at)>=15*60_000));
+  const stale=r.context.filter(c=>(c.expires_at&&Date.parse(c.expires_at)<=now)||(c.observed_at&&/^(location|city|area|user_current_location)$/i.test(c.key)&&now-Date.parse(c.observed_at)>=15*60_000)).map(c=>c.key);
   const live={...r,context:fresh};
   const gaps=openGaps(m,live);
   const ask:FillDecision["ask"]=[],defaults:FillDecision["defaults"]=[];

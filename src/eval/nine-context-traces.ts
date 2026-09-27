@@ -24,7 +24,7 @@ export async function runNineContextTraces(h:SearchHarness,tenantId:string,provi
   const rows=[];
   for(const c of NINE_CASES.filter(c=>!only||only.includes(c.id))){
     const used=provided.filter(x=>x.case_id===c.id&&(c.requested as readonly string[]).includes(x.key));
-    const makeRequest=(context:Item[])=>SearchRequestSchema.parse({query:c.query,tenant_id:tenantId,context,
+    const makeRequest=(context:Item[],revision?:string)=>SearchRequestSchema.parse({query:c.query,tenant_id:tenantId,context,curation_revision_of:revision,caller_fill_complete:!!revision,
       permissions:{may_pull_context:true,may_ask_user:false,may_retain:false,may_learn:false,scopes:['nine-trace-eval']},
       limits:{latency_ms:10000,max_provider_calls:3,max_results:5,max_extracts:5,allow_deep_research:false}});
     const start=Date.now();
@@ -36,7 +36,7 @@ export async function runNineContextTraces(h:SearchHarness,tenantId:string,provi
       const initial=await h.search(makeRequest([]),{surface:'nine_context_trace',trace});
       const asked=initial.status==='needs_input'&&'requested_context'in initial?initial.requested_context:[];
       const answered=used.filter(x=>asked.some(y=>canonicalContextKey(y.key)===canonicalContextKey(x.key)));
-      const final=answered.length?await h.search(makeRequest(answered),{surface:'nine_context_trace',trace}):initial;
+      const final=answered.length?await h.search(makeRequest(answered,"curation_id" in initial?initial.curation_id:undefined),{surface:'nine_context_trace',trace}):initial;
       rows.push({id:c.id,query:c.query,stages,parameters_requested:asked,parameters_supplied:answered.map(x=>({case_id:x.case_id,key:x.key,source:x.source,confidence:x.confidence,observed_at:x.observed_at})),
         initial_status:initial.status,status:final.status,latency_ms:Date.now()-start,
         ...(final.status==='complete'?{query_class:final.plan?.query_class??final.route_decision?.task_class,route:final.route,route_decision:final.route_decision,extraction:final.plan?.extraction,

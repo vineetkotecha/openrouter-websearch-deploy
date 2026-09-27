@@ -6,7 +6,7 @@ import type { Mandate, SearchRequest } from "../contracts/search.js";
 export type ContextRequest = {
   status: "needs_input"; kind: "context_request"; episode_id: string; gap: string; question: string;
   requested_context: { key: string; why: string; accepted_sources: ("caller" | "human" | "prior_outcome")[]; scope: string[] }[];
-  how_to_answer: string;
+  how_to_answer: string; curation_id?: string; remaining_user_question?: string;
 };
 
 const LOCAL = /\b(near me|nearby|near by|around me|in my area|closest|open now|local)\b/i;
@@ -19,7 +19,7 @@ const BUY = /\b(buy|purchase|shop|order|price|cheap|deal|under \$?[0-9])\b/i;
 // Heuristic gaps: only facts the query cannot answer and that change the result set.
 // Location for "near me" searches is material; budget for shopping is not (we still rank without it).
 export function heuristicGaps(r: SearchRequest): Mandate["gaps"] {
-  const has = (k: RegExp) => r.context.some(c => (!c.expires_at||Date.parse(c.expires_at)>Date.now())&&(k.test(c.key)||k.test(canonicalContextKey(c.key)))&&c.value!=null&&String(c.value).trim()!=="") || Object.entries(r.hard_constraints).some(([key,value]) => k.test(key)&&value!=null&&String(value).trim()!=="");
+  const has = (k: RegExp) => r.context.some(c => (!c.expires_at||Date.parse(c.expires_at)>Date.now())&&(!c.allowed_uses||c.allowed_uses.includes("search"))&&c.class!=="psychological"&&(k.test(c.key)||k.test(canonicalContextKey(c.key)))&&c.value!=null&&String(c.value).trim()!=="") || Object.entries(r.hard_constraints).some(([key,value]) => k.test(key)&&value!=null&&String(value).trim()!=="");
   const gaps: Mandate["gaps"] = [];
   // Broad shopping requests need the intended use before the result set is meaningful.
   if (/\bbest laptop\b/i.test(r.query) && !has(/^(use_case|purpose|usage)/i))
@@ -37,7 +37,7 @@ export function heuristicGaps(r: SearchRequest): Mandate["gaps"] {
 
 // Drop gaps the caller already answered through context or hard constraints.
 export function openGaps(m: Mandate, r: SearchRequest): Mandate["gaps"] {
-  const answered = new Set([...r.context.filter(c=>!c.expires_at||Date.parse(c.expires_at)>Date.now()).map(c => canonicalContextKey(c.key)), ...Object.keys(r.hard_constraints).map(canonicalContextKey)]);
+  const answered = new Set([...r.context.filter(c=>(!c.expires_at||Date.parse(c.expires_at)>Date.now())&&c.value!=null&&String(c.value).trim()!==""&&(!c.allowed_uses||c.allowed_uses.includes("search"))&&c.class!=="psychological").map(c => canonicalContextKey(c.key)), ...Object.keys(r.hard_constraints).map(canonicalContextKey)]);
   return canonicalGaps(m.gaps).filter(g => !answered.has(g.key));
 }
 
@@ -46,7 +46,7 @@ export function contextRequest(episode_id: string, gap: { key: string; question?
     status: "needs_input", kind: "context_request", episode_id, gap: gap.key,
     question: gap.question ?? `Provide ${gap.key}.`,
     requested_context: [{ key: gap.key, why: `Material to the result set: ${gap.question ?? gap.key}`, accepted_sources: ["caller", "human", "prior_outcome"], scope: r.permissions.scopes.length ? r.permissions.scopes : ["this_search"] }],
-    how_to_answer: `Call search again with the same query and add {"key":"${gap.key}","value":...,"source":"caller"|"human"|"prior_outcome","confidence":0-1} to context. Send only what the user allowed you to share; omit it to search without it.`,
+    how_to_answer: `Check permitted caller context first. If unavailable, ask the user one batched question for remaining material keys. Call search again with the same query, curation_revision_of, caller_fill_complete:true and evidenced context answers. Send only what the user allowed you to share; omit an optional fact rather than guess.`,
   };
 }
 
@@ -59,7 +59,7 @@ export function contextUsed(r: SearchRequest) {
 // Provider-facing query: a pulled location replaces "near me" so providers search the right place.
 // The caller's other context stays out of the provider query.
 export function localizeQuery(r: SearchRequest): SearchRequest {
-  const item = r.context.find(c => (!c.expires_at||Date.parse(c.expires_at)>Date.now()) && /^(location|city|area|address)$/i.test(canonicalContextKey(c.key)) && typeof c.value === "string" && c.value.trim());
+  const item = r.context.find(c => (!c.expires_at||Date.parse(c.expires_at)>Date.now()) && (!c.allowed_uses||c.allowed_uses.includes("search")) && c.confidence>=.7 && /^(location|city|area|address)$/i.test(canonicalContextKey(c.key)) && typeof c.value === "string" && c.value.trim());
   const loc = (item?.value as string | undefined) ?? (typeof r.hard_constraints.location === "string" ? r.hard_constraints.location : undefined);
   if (!loc || r.query.toLowerCase().includes(loc.toLowerCase())) return r;
   const near = /\b(near me|nearby|near by|around me|in my area)\b/i;

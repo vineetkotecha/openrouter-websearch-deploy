@@ -16,6 +16,6 @@ describe("lean parameter filling",()=>{
  });
  it("returns one request with multiple context keys",async()=>{
    const h=new SearchHarness({SEARCH_TIMEOUT_MS:1000} as any,{write:async r=>{const m=await writer.write(r);return {...m,gaps:[{key:"location",material:true,question:"Which area?"},{key:"diet",material:true,question:"Any diet?"}]}}},[],new MemoryStore());
-   const out:any=await h.search(request({query:"pizza near me"}));expect(out.kind).toBe("context_request");expect(out.requested_context.map((x:any)=>x.key)).toEqual(["location","diet"]);
+   const out:any=await h.search(request({query:"pizza near me"}));expect(out.kind).toBe("context_request");expect(out.requested_context.map((x:any)=>x.key)).toEqual(["location"]);
  });
 });

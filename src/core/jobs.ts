@@ -221,6 +221,8 @@ export type PlannedJob = {
   fallback?: string;
   candidates: ScoredCandidate[];
   reason: string;
+  priority?: number;
+  factor_keys?: string[];
 };
 
 export type JobPlan = { version: 1; classification: Classification; budget: Budget; jobs: PlannedJob[]; notes: string[] };
@@ -236,7 +238,7 @@ function pickJob(id: string, kind: JobKind, c: Classification, r: SearchRequest,
 
 // Decompose a mandate into jobs. Discovery -> evidence is the default; known URLs skip
 // discovery; structured and premium paths run first where the class calls for them.
-export function planJobs(r: SearchRequest, m: Mandate, providers: SearchProvider[], health = new ProviderHealth(), preferredDiscovery?: string): JobPlan {
+export function planJobs(r: SearchRequest, m: Mandate, providers: SearchProvider[], health = new ProviderHealth(), preferredDiscovery?: string, curated?: {parameters:{key:string;state:string;material:boolean;effect:string;hard:boolean}[]}): JobPlan {
   const c = classifyMandate(r, m);
   const budget = budgetFor(r, c);
   const jobs: PlannedJob[] = [];
@@ -277,6 +279,13 @@ export function planJobs(r: SearchRequest, m: Mandate, providers: SearchProvider
     else notes.push("Deep research gate open but no deep-research provider live.");
   } else notes.push(`Deep research gate closed (${gate.reason}).`);
   if (c.signals.includes("structure_overlay")) notes.push("Structure requested: survivors are extracted for field fill.");
+  // Stable priority: explicit eligibility/retrieval factors first, then evidence-heavy
+  // structured extraction; optional ranking preferences never spawn provider calls.
+  if(curated){
+    const keys=curated.parameters.filter(p=>p.state==="resolved"&&(p.hard||p.material)&&p.effect!=="ranking").map(p=>p.key);
+    for(const job of jobs){job.factor_keys=keys;job.priority=job.id==="deep_research"||job.id==="open_web_backup"?10:job.kind==="structured"||job.kind==="premium"?90:keys.length?80:60;job.reason+=` Curated factors: ${keys.join(", ")||"query only"}.`;}
+    jobs.sort((a,b)=>(b.priority??0)-(a.priority??0));
+  }
   const capped = jobs.slice(0, budget.max_jobs);
   if (capped.length < jobs.length) notes.push(`Job cap ${budget.max_jobs} applied.`);
   return { version: 1, classification: c, budget, jobs: capped, notes };

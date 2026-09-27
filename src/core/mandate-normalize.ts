@@ -38,7 +38,7 @@ export async function normalizeModelMandate(raw:any,r:SearchRequest,promptVersio
     if(i>=0)factors.splice(i,1);
     factors.push({key:p.key,class:"psychological",description:`Use ${p.key} only to rank eligible results.`,value:p.value,weight:.65,confidence:p.confidence,hard:false,evidence:p.evidence});
   }
-  for (const p of r.context.filter(x=>x.class==="psychological" && x.source!=="query" && x.evidence?.length && (!x.expires_at || Date.parse(x.expires_at)>Date.now()) && (!x.allowed_uses || x.allowed_uses.includes("search")))) {
+  for (const p of r.context.filter(x=>x.class==="psychological" && x.source!=="query" && x.evidence?.length && (!x.expires_at || Date.parse(x.expires_at)>Date.now()) && (!x.allowed_uses || x.allowed_uses.includes("rerank")))) {
     const i=factors.findIndex(f=>f.key===p.key && f.class==="psychological");
     if(i>=0)factors.splice(i,1);
     factors.push({key:p.key,class:"psychological",description:`Use ${p.key} only to rank eligible results.`,value:p.value,weight:.6,confidence:p.confidence,hard:false,evidence:p.evidence!});
