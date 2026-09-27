@@ -55,7 +55,7 @@ describe('input-grounded hard specifications',()=>{
   for(const query of ['best laptop','quiet laptop with 8GB RAM']) {
    const r=SearchRequestSchema.parse({tenant_id:'t',query});
    const x=await normalizeModelMandate({factors:[{...factor('16GB'),hard:true}],gaps:[]},r,'test');
-   expect(x.factors.find(f=>f.key==='ram')?.hard).toBe(false);
+   expect(x.factors.some(f=>f.key==='ram'&&f.value==='16GB'&&f.hard)).toBe(false);
   }
  });
 });
@@ -81,8 +81,23 @@ it('promotes the real Gemini structured RAM factor only on exact query support',
  const r=SearchRequestSchema.parse({tenant_id:'t',query:'quiet laptop for a shared office with 16GB RAM'});
  const f={key:'ram_capacity_gb',class:'functional',description:'The laptop must have at least the specified amount of RAM.',value:{operator:'greater_than_or_equal_to',unit:'GB',value:16},weight:1,confidence:1,hard:true,evidence:[{source:'query',reference:'16GB RAM'}]};
  const x=await normalizeModelMandate({factors:[f],gaps:[]},r,'test');
- expect(x.factors.find(z=>z.key==='ram_capacity_gb')?.hard).toBe(true);
+ expect(x.factors.find(z=>z.key==='ram')).toMatchObject({value:'16GB',hard:true});
+ expect(x.factors.some(z=>z.key==='ram_capacity_gb')).toBe(false);
  const other=SearchRequestSchema.parse({tenant_id:'t',query:'quiet laptop with 8GB RAM'});
  const y=await normalizeModelMandate({factors:[{...f,evidence:[{source:'query',reference:'query'}]}],gaps:[]},other,'test');
- expect(y.factors.find(z=>z.key==='ram_capacity_gb')?.hard).toBe(false);
+ expect(y.factors.find(z=>z.key==='ram')).toMatchObject({value:'8GB',hard:true});
+ expect(y.factors.some(z=>z.key==='ram_capacity_gb')).toBe(false);
+});
+
+it('derives one RAM hard gate from the raw explicit query despite model factor variation',async()=>{
+ const r=SearchRequestSchema.parse({tenant_id:'t',query:'quiet laptop for a shared office with 16GB RAM'});
+ for(const factors of [[],[{key:'memory_amount',class:'functional',description:'Memory preference',value:'8GB',weight:.6,confidence:.6,hard:false,evidence:[{source:'query',reference:'query'}]}],[{key:'ram_capacity_gb',class:'functional',description:'RAM',value:{operator:'greater_than_or_equal_to',unit:'GB',value:16},weight:1,confidence:1,hard:false,evidence:[{source:'query',reference:'16GB RAM'}]}]]){
+  const x=await normalizeModelMandate({factors,gaps:[]},r,'test');
+  const ram=x.factors.filter(z=>/^(ram|memory)(?:_|$)/i.test(z.key));
+  expect(ram).toHaveLength(1);expect(ram[0]).toMatchObject({key:'ram',value:'16GB',hard:true,evidence:[{source:'query',reference:'with 16GB RAM'}]});
+ }
+ for(const query of ['best laptop','quiet laptop with 8GB RAM']){
+  const x=await normalizeModelMandate({factors:[],gaps:[]},SearchRequestSchema.parse({tenant_id:'t',query}),'test');
+  expect(x.factors.some(z=>z.key==='ram'&&z.value==='16GB'&&z.hard)).toBe(false);
+ }
 });
