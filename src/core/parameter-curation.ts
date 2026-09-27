@@ -52,16 +52,9 @@ export function curateParameters(r: SearchRequest, m?: Mandate, revision_of?: st
     const key=canonicalContextKey(p.key);if(slots.has(`psychological:${key}`))continue;
     put({key,class:"psychological",value:p.value,state:"resolved",source:"caller",evidence:p.evidence,confidence:p.confidence,allowed_uses:["rerank"],hard:false,material:false,priority:10,effect:"ranking"});
   }
-  // The mandate writer can propose more functional factors, but the manifest admits
-  // one only when its value and provenance match an input. Model prose alone cannot
-  // establish a personal fact or a new hard constraint.
-  for(const f of m?.factors??[]){
-    const key=canonicalContextKey(f.key),id=`${f.class}:${key}`;
-    if(slots.has(id)||f.class==="psychological"||f.value===undefined)continue;
-    const phrase=f.evidence.find(e=>e.source==="query"&&e.reference&&e.reference!=="query"&&r.query.toLowerCase().includes(e.reference.toLowerCase()));
-    if(!phrase)continue;
-    put({key,class:"functional",value:f.value,state:"resolved",source:"query",evidence:[phrase],confidence:f.confidence,allowed_uses:["search","rerank"],hard:f.hard,material:f.hard,priority:f.hard?100:50,effect:f.hard?"eligibility":"retrieval"});
-  }
+  // Model-authored values never become curated facts just because a broad query
+  // phrase resembles their evidence. The mandate may use them as tentative
+  // ranking hints; this manifest contains only explicit constraints/context.
   const gaps=canonicalGaps([...heuristicGaps(r),...(m?.gaps??[])]);
   for(const g of gaps){const key=canonicalContextKey(g.key),old=slots.get(`functional:${key}`);
     if(old?.state==="resolved" && !old.alternatives?.length)continue;

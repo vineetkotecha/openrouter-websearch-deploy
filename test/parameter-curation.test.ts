@@ -51,3 +51,9 @@ describe("curation safety and routing trace",()=>{
   expect(r.plan.jobs[0]).toHaveProperty("priority");expect(r.plan).toHaveProperty("curation");
  });
 });
+
+it("does not launder a model's invented rating into the curated record from a broad query",async()=>{
+ const r=req({query:"best laptop"}),m=await new HeuristicMandateWriter().write(r);
+ m.factors.push({key:"average_user_rating",class:"functional",description:"At least four stars",value:4,weight:.8,confidence:.7,hard:false,evidence:[{source:"query",reference:"best laptop"}]});
+ expect(curateParameters(r,m).parameters.some(x=>x.key==="average_user_rating")).toBe(false);
+});
