@@ -93,7 +93,7 @@ export function formProviderQuery(r: SearchRequest, phase: "pre_fill" | "post_fi
   if(hotelPropertySearch(r)) {
     // The answer is a hotel, not a collection of hotels. Keep constraints as
     // terms rather than sending a conversational instruction to the index.
-    const place=r.query.match(/\b(?:in|around|near)\s+([\p{L}\s]+?)(?=\s+(?:for|on|under|below|with|one|this|tonight|tomorrow|\d)|[,.;]|$)/iu)?.[1]?.trim();
+    const place=r.query.match(/\b(?:in|around|near)\s+([\p{L}\s]+?)(?=\s+(?:for|on|under|below|with|one|this|tonight|tomorrow|\d)|[,.;]|$)/iu)?.[1]?.trim()??r.query.match(/^([\p{L}\s]+?)\s+(?:hotel|stay|lodging|rooms?)\b/iu)?.[1]?.trim();
     const cap=r.query.match(/(?:under|below|within|up to|maximum|max)\s*(?:[₹$€£]|rs\.?\s*)?\s*([\d,]+(?:\s*[-–]\s*[\d,]+)?)/i)?.[1];
     const date=r.query.match(/\b(?:on|for|night of|one night)\s+(?:the\s+)?(\d{1,2}(?:st|nd|rd|th)?\s+(?:Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?|Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?)(?:\s+\d{4})?)/i)?.[1];
     query=["hotel property",place,cap?`under ₹${cap.replace(/\s/g,"")}`:undefined,date, /\b3\s*star\b/i.test(r.query)?"3 star":undefined,"rooms rates reviews"].filter(Boolean).join(" ");
