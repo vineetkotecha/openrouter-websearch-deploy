@@ -6,6 +6,7 @@ export type Eligibility={eligible:boolean;reasons:string[];verification:Record<s
 const listingPath=/(?:list-of-|\/listings?\/|\/search(?:[/?]|$)|\/s\/|\/stays\/|\/hotels-(?:in|near)-|\/hotels\/[^/?]+(?:[/?]|$))/i;
 const collectionTitle=/\b(?:best|budget|cheap|top|list of|hotels|products|items|stores|people)\b.*\b(?:hotels?|products?|items?|near|in)\b/i;
 const hotelName=/\b(?:hotel|fabhotel|treebo|oyo|collection o|olive zip|xotel|residency|inn|suites|rooms|stay)\b/i;
+const socialOrEditorial=/\b(?:facebook|instagram|youtube|tiktok|reddit|quora|pinterest)\.com$/i;
 const amount=(v:unknown):number|null=>{if(typeof v==='number')return Number.isFinite(v)?v:null;const s=String(v??'').replace(/,/g,'');const m=s.match(/(?:₹|Rs\.?|INR|\$)\s*(\d+(?:\.\d+)?)/i)??s.match(/^\s*(\d+(?:\.\d+)?)\s*$/);return m?Number(m[1]!):null};
 const supportedField=(x:ProviderResult,key:RegExp)=>Object.entries(x.fields??{}).find(([k,v])=>key.test(k)&&v.state==='supported'&&v.value!==null);
 function explicitBudget(r:SearchRequest){const structured=Object.entries(r.hard_constraints).find(([k,v])=>/^(?:budget|price|max_price|price_max|price_limit_inr)$/i.test(k)&&amount(v)!==null);if(structured)return amount(structured[1]);const m=r.query.match(/(?:under|below|within|up to|maximum|max)\s*(?:₹|rs\.?\s*)?\s*([\d,]+)(?:\s*[-–]\s*([\d,]+))?/i);return m?Number((m[2]??m[1]!).replace(/,/g,'')):null}
@@ -14,9 +15,10 @@ export function eligibility(r:SearchRequest,m:Mandate,x:ProviderResult):Eligibil
  let url:URL;try{url=new URL(x.url)}catch{return{eligible:false,reasons:['invalid URL'],verification}};
  if(strategy?.requiresNamedEntity){
   const title=x.title.replace(/\s*[-|:].*$/,'').trim();
+  if(socialOrEditorial.test(url.hostname))reasons.push('social or discussion page, not a direct answer listing');
   if(strategy.unit==='hotel_property'){
    if(listingPath.test(url.pathname)||collectionTitle.test(title)&&!/^\s*(?:fabhotel|treebo|oyo|collection o|olive zip|xotel)\b/i.test(title))reasons.push('collection page, not an individual hotel');
-   if(!hotelName.test(title))reasons.push('no named hotel property in result title');
+   if(!hotelName.test(title)||/^(?:this|the|a|our)\s+hotel\b|\bthis hotel\b/i.test(title)||/^[+\d\s()\-]{8,}/.test(title))reasons.push('no named hotel property in result title');
   }else if(listingPath.test(url.pathname)||collectionTitle.test(title))reasons.push('collection page, not an individual answer');
   verification[strategy.unit]={status:'unverified',...(reasons.length?{}:{evidence:`entity-shaped title: ${x.title}`})};
  }

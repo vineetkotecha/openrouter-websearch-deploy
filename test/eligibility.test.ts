@@ -30,3 +30,5 @@ it('uses general supported-field gating for products, not only hotels',()=>{
 });
 
 it('does not branch on model-imagined price and availability categories for one answer unit',()=>{const flight=SearchRequestSchema.parse({tenant_id:'t',query:'flights from Bangalore to Goa on 12 October'});const f=normalizeIntentFormation({intent_space:[{category:'Flight Search',why:'route'},{category:'Price Inquiry',why:'cost'},{category:'Availability Check',why:'date'},{category:'Itinerary Planning',why:'trip'}]},flight);expect(f.strategy).toBe('focused');expect(f.intent_space.map(x=>x.category)).toEqual(['flight_itinerary']);expect(f.search_branches).toEqual([])});
+
+it('rejects social videos with an incidental hotel mention as direct properties',()=>{const y=x('https://www.facebook.com/bhavaniresidency/videos/123','+91 95130 60062 ( HEMANTH ) This hotel has 3 single bed ...');const g=eligibility(r,m,y);expect(g.eligible).toBe(false);expect(g.reasons.join(' ')).toMatch(/social or discussion page/);expect(g.reasons.join(' ')).toMatch(/no named hotel property/)});

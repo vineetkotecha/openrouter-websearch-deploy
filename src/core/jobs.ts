@@ -205,6 +205,7 @@ export function scoreCandidates(kind: JobKind, c: Classification, r: SearchReque
     else if (blocked.has(name)) excluded = "policy: excluded by hard constraint";
     else if (!health.quotaLeft(name)) excluded = "quota exhausted";
     else if (health.recentErrors(name) >= 1) excluded = "recent repeated failures";
+    else if (name==="serpapi" && health.recentErrors(name)>0 && kind==="discovery" && r.limits.latency_ms<=30000) excluded = "recent timeout; avoid slow fallback for latency-limited search";
     else if (health.authRejected(name)) excluded = "key rejected (401/403) in the last hour";
     else if (!cap.kinds.includes(kind)) excluded = `no ${kind} capability`;
     else if (fit === 0) excluded = `no fit for ${c.query_class}`;
