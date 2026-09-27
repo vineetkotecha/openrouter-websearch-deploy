@@ -175,3 +175,5 @@ it("extracts five discovery survivors by default within the existing token budge
  const r=req("patents filed for solid state batteries");const c=classifyMandate(r,await writer.write(r));
  const b=budgetFor(r,c);expect(b.max_extracts).toBe(5);expect(b.max_extract_chars*b.max_extracts).toBeLessThanOrEqual(b.token_budget*4);
 });
+
+it('does not choose a repeatedly timing-out SerpApi fallback for a latency-limited search',async()=>{const r=req('hotels in Bangalore under ₹1800',{limits:{latency_ms:30000,max_provider_calls:3,max_results:5}});const m=await writer.write(r);const h=new ProviderHealth();h.record('serpapi',false,'This operation was aborted');const p=planJobs(r,m,[fake('serper',()=>[],[]),fake('serpapi',()=>[],[]),fake('brave',()=>[],[])],h);expect(p.jobs[0]?.primary).toBe('serper');expect(p.jobs[0]?.fallback).toBe('brave');expect(p.jobs[0]?.candidates.find(x=>x.provider==='serpapi')?.excluded).toMatch(/recent timeout/)});
