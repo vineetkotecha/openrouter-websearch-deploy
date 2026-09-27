@@ -42,3 +42,37 @@ it('rejects a model-invented rating cutoff from a broad best laptop query',async
  const x=await normalizeModelMandate({factors:[{key:'average_user_rating',class:'functional',description:'at least four stars',value:{min_rating:4,scale:5},weight:.8,confidence:.7,hard:false,evidence:[{source:'query',reference:'best laptop'}]}]},r,'test');
  expect(x.factors.some(f=>f.key==='average_user_rating')).toBe(false);
 });
+
+
+describe('input-grounded hard specifications',()=>{
+ const factor=(value:string)=>({key:'ram',class:'functional',description:'RAM capacity',value,weight:.9,confidence:.8,hard:false,evidence:[{source:'query',reference:'query'}]});
+ it('promotes with 16GB RAM even if the model called it soft',async()=>{
+  const r=SearchRequestSchema.parse({tenant_id:'t',query:'quiet laptop for a shared office with 16GB RAM'});
+  const x=await normalizeModelMandate({factors:[factor('16GB')],gaps:[]},r,'test');
+  expect(x.factors.find(f=>f.key==='ram')?.hard).toBe(true);
+ });
+ it('does not promote invented specs from broad adjectives or mismatched values',async()=>{
+  for(const query of ['best laptop','quiet laptop with 8GB RAM']) {
+   const r=SearchRequestSchema.parse({tenant_id:'t',query});
+   const x=await normalizeModelMandate({factors:[{...factor('16GB'),hard:true}],gaps:[]},r,'test');
+   expect(x.factors.find(f=>f.key==='ram')?.hard).toBe(false);
+  }
+ });
+});
+
+describe('material gap grounding',()=>{
+ it('rejects a model gap for weekend getaway from Delhi',async()=>{
+  const r=SearchRequestSchema.parse({tenant_id:'t',query:'weekend getaway from Delhi'});
+  const x=await normalizeModelMandate({factors:[],gaps:[
+   {key:'departure_city',material:true,question:'Where are you leaving from?'},
+   {key:'budget',material:true,question:'What is your budget?'},
+   {key:'destination',material:true,question:'Where would you like to go?'}
+  ]},r,'test');
+  expect(x.gaps).toEqual([]);
+ });
+ it('rejects an origin question answered in a weekend trip query',async()=>{
+  const r=SearchRequestSchema.parse({tenant_id:'t',query:'weekend trip from Delhi'});
+  const x=await normalizeModelMandate({factors:[],gaps:[{key:'departure_city',material:true,question:'Where are you leaving from?'}]},r,'test');
+  expect(x.gaps).toEqual([]);
+ });
+});
