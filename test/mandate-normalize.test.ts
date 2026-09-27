@@ -36,3 +36,9 @@ describe('strict factor provenance',()=>{it('rejects fabricated human evidence a
  expect(x.factors.some(f=>f.key==='source_reliability')).toBe(false);
  expect(x.factors.find(f=>f.key==='trip_duration')?.hard).toBe(false);
 });});
+
+it('rejects a model-invented rating cutoff from a broad best laptop query',async()=>{
+ const r=SearchRequestSchema.parse({tenant_id:'t',query:'best laptop'});
+ const x=await normalizeModelMandate({factors:[{key:'average_user_rating',class:'functional',description:'at least four stars',value:{min_rating:4,scale:5},weight:.8,confidence:.7,hard:false,evidence:[{source:'query',reference:'best laptop'}]}]},r,'test');
+ expect(x.factors.some(f=>f.key==='average_user_rating')).toBe(false);
+});

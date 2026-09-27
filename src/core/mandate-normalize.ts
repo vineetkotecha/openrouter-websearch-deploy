@@ -24,6 +24,9 @@ export async function normalizeModelMandate(raw:any,r:SearchRequest,promptVersio
     if(!evidence.length)continue;
     const explicitHard=Object.prototype.hasOwnProperty.call(r.hard_constraints,f.key)||evidence.some((e:any)=>e.source==='query'&&e.reference!=='query'&&typeof e.reference==='string'&&r.query.toLowerCase().includes(e.reference.toLowerCase())&&/\b(?:only|under|without|must|no|within|before|after|latest|peer-reviewed)\b/i.test(e.reference));
     const next={...f,evidence,hard:psychological?false:!!f.hard&&explicitHard};
+    // A broad adjective does not license a fabricated numerical threshold.
+    // In particular, "best laptop" does not mean a four-star minimum.
+    if(f.class==="functional"&&/(?:rating|reviews?_count|stars)/i.test(f.key)&&typeof f.value!=="undefined"&&!/\b(?:[1-5](?:\.[0-9])?\s*(?:stars?|\/\s*5)|rating\s*(?:of|above|over|at least|>=|>))\b/i.test(r.query)&&!Object.prototype.hasOwnProperty.call(r.hard_constraints,f.key)&&!r.context.some(c=>c.key===f.key))continue;
     const parsed=MandateSchema.shape.factors.element.safeParse(next);
     if(parsed.success)valid.push(parsed.data);
   }
