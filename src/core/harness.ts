@@ -134,7 +134,7 @@ export class SearchHarness {
       } catch (e) { return { status: e instanceof Error ? e.message : "error", latency_ms: Date.now() - s, results: [] as ProviderResult[] }; }
       finally { clearTimeout(t); }
     };
-    const grade = (xs: ProviderResult[]) => { const top = rank(finalMandate, xs, 3); return top.length ? top.reduce((a, x) => a + x.mandate_fit, 0) / top.length : 0; };
+    const grade = (xs: ProviderResult[]) => { const eligible=gateResults(effective,finalMandate,xs).retained.map(x=>x.result); const top=rank(finalMandate,eligible,3); return top.length?top.reduce((a,x)=>a+x.mandate_fit,0)/top.length:0; };
     const exec = await executePlan(plan, this.providers, call, grade, this.health);
     meta?.trace?.('6_provider_execution',{runs:exec.runs,result_count:exec.results.length,candidates:exec.results.map(x=>({provider:x.provider,url:x.url,title:x.title})),fallback_used:exec.fallback_used,escalated:exec.escalated,skipped:exec.skipped});
 
