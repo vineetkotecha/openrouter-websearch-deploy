@@ -26,8 +26,12 @@ export function normalizeIntentFormation(raw:unknown,r:SearchRequest):IntentForm
  const unknowns=Array.isArray(x.unknowns)?x.unknowns.slice(0,10).map(v=>({key:clean(v?.key,64),question:clean(v?.question),why:clean(v?.why),result_changing:v?.result_changing===true})).filter(v=>slug(v.key)&&v.question&&v.why):[];
  const candidate_human_factors=Array.isArray(x.candidate_human_factors)?x.candidate_human_factors.slice(0,8).map(v=>({key:clean(v?.key,64),question:clean(v?.question),why:clean(v?.why)})).filter(v=>slug(v.key)&&v.question&&v.why):[];
  const unit=answerStrategy(r);
- const conflicting=unit&&distinct.some(v=>{const c=v.category.toLowerCase();if(/^(?:location|date|time|price|budget)(?:[ -].*)?$/.test(c))return false;return !c.includes(unit.unit.split('_')[0]!)&&!unit.dimensions.some(d=>c.includes(d.replace('_',' ')))&&!/^(?:accommodation|hotel|lodging|stay|flight|airfare|product|shopping|shoe|laptop|phone|local|person|research|paper)$/i.test(c)});
- const selected=conflicting?undefined:unit;
+ // A model can describe price, date, advice or availability as separate
+ // categories, but those are dimensions of the explicit answer unit. Only a
+ // distinct answer unit in the query justifies separate branches. Multi-unit
+ // queries are deliberately left to the model because answerStrategy returns
+ // undefined for those.
+ const selected=unit&&!r.category_hint?unit:undefined;
  const categories=selected?[{category:selected.unit,why:`Answer unit ${selected.unit}; dimensions ${selected.dimensions.join(", ")}.`}]:distinct;
  const ambiguous=categories.length>1;
  const category_state=r.category_hint?"explicit":selected?"explicit":ambiguous?"ambiguous":"unknown";
