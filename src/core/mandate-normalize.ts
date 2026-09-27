@@ -2,7 +2,23 @@ import type {SearchRequest} from "../contracts/search.js";
 import {MandateSchema, type Mandate} from "../contracts/search.js";
 
 import {randomUUID} from "node:crypto";
+import {canonicalContextKey, heuristicGaps} from "./context-pull.js";
 const sources=new Set(["query","caller","human","prior_outcome"]);
+// Only an exact input-backed specification can turn a model factor into a hard gate.
+// The broad adjective "best" never licenses a numeric requirement.
+function explicitSpec(r:SearchRequest, f:any, evidence:any[]){
+  if(f.class!=="functional" || !evidence.some(e=>e.source==="query" && typeof e.reference==="string" && (e.reference==="query" || r.query.toLowerCase().includes(e.reference.toLowerCase()))))return false;
+  // Match the supplied numeric value AND its parameter, not just a nearby number.
+  // A model's prose can identify the same value when its typed value is numeric.
+  const factor=`${f.key} ${f.description} ${String(f.value??"")}`;
+  const specs=[...r.query.matchAll(/\b(?:with|at least|minimum|must have|requires?)\s+(\d+(?:\.\d+)?\s*(?:GB|TB|MB|W|Wh|mAh|MP|inch(?:es)?|in))\s+(RAM|memory|storage|capacity|power|battery|size|resolution)\b/gi)];
+  return specs.some(([, amount, param])=>{
+    if(!amount||!param)return false;
+    const names=/^(?:ram|memory)$/i.test(param)?/\b(?:ram|memory)\b/i:new RegExp(`\\b${param}\\b`,"i");
+    return names.test(f.key) && new RegExp(amount.trim().replace(/\s+/g,"\\s*"),"i").test(factor);
+  });
+}
+
 // Schema-safe normalization. The deterministic baseline preserves explicit constraints and
 // five quality factors; model factors can add detail only after provenance is checked.
 export async function normalizeModelMandate(raw:any,r:SearchRequest,promptVersion:string):Promise<Mandate>{
@@ -23,7 +39,7 @@ export async function normalizeModelMandate(raw:any,r:SearchRequest,promptVersio
     const evidence=Array.isArray(f.evidence)?f.evidence.filter((e:any)=>e&&sources.has(e.source)&&(typeof e.reference==="string"?provenance(e,f):e.source==="query"&&!psychological)):[];
     if(!evidence.length)continue;
     const explicitHard=Object.prototype.hasOwnProperty.call(r.hard_constraints,f.key)||evidence.some((e:any)=>e.source==='query'&&e.reference!=='query'&&typeof e.reference==='string'&&r.query.toLowerCase().includes(e.reference.toLowerCase())&&/\b(?:only|under|without|must|no|within|before|after|latest|peer-reviewed)\b/i.test(e.reference));
-    const next={...f,evidence,hard:psychological?false:!!f.hard&&explicitHard};
+    const next={...f,evidence,hard:psychological?false:(explicitHard&&!!f.hard)||explicitSpec(r,f,evidence)};
     // A broad adjective does not license a fabricated numerical threshold.
     // In particular, "best laptop" does not mean a four-star minimum.
     if(f.class==="functional"&&/(?:rating|reviews?_count|stars)/i.test(f.key)&&typeof f.value!=="undefined"&&!/\b(?:[1-5](?:\.[0-9])?\s*(?:stars?|\/\s*5)|rating\s*(?:of|above|over|at least|>=|>))\b/i.test(r.query)&&!Object.prototype.hasOwnProperty.call(r.hard_constraints,f.key)&&!r.context.some(c=>c.key===f.key))continue;
@@ -50,6 +66,12 @@ export async function normalizeModelMandate(raw:any,r:SearchRequest,promptVersio
   if (/\b(?:latest|this week|today|breaking)\b/i.test(r.query) && !factors.some(f=>f.class==="functional" && f.hard && /(?:fresh|recent|week|latest|date|today|breaking)/i.test(`${f.key} ${f.description} ${String(f.value??"")}`))) {
     factors.unshift(defaultFactor("freshness","Require the explicit recency window in the query.",r.query,1,true));
   }
-  const gaps=Array.isArray(raw.gaps)?raw.gaps.filter((g:any)=>g&&typeof g.key==="string"&&/^[a-z][a-z0-9_]{0,63}$/.test(g.key)&&g.material===true&&typeof g.question==="string"&&g.question.trim().length>0&&g.question.length<=300):[];
+  // A model's assertion that a gap is material is not independent evidence.
+  // Keep it only when an input-grounded blocker agrees, and never ask for a
+  // query fact already supplied in words or structured context.
+  const grounded=new Set(heuristicGaps(r).filter(g=>g.material).map(g=>canonicalContextKey(g.key)));
+  const supplied=new Set([...Object.keys(r.hard_constraints),...r.context.filter(c=>c.class!=="psychological"&&c.value!=null&&(!c.expires_at||Date.parse(c.expires_at)>Date.now())).map(c=>c.key)].map(canonicalContextKey));
+  if(/\b(?:from|leaving from)\s+[A-Z][\p{L}]+/u.test(r.query))supplied.add("origin");
+  const gaps=Array.isArray(raw.gaps)?raw.gaps.filter((g:any)=>g&&typeof g.key==="string"&&/^[a-z][a-z0-9_]{0,63}$/.test(g.key)&&g.material===true&&typeof g.question==="string"&&g.question.trim().length>0&&g.question.length<=300&&grounded.has(canonicalContextKey(g.key))&&!supplied.has(canonicalContextKey(g.key))):[];
   return MandateSchema.parse({id:randomUUID(),version:2,prompt_version:promptVersion,intent:typeof raw.intent==="string"&&raw.intent.trim()?raw.intent:r.query,category:typeof raw.category==="string"&&raw.category.trim()?raw.category:base.category,factors:factors.slice(0,50),gaps,policy:r.permissions,created_at:new Date().toISOString()});
 }
