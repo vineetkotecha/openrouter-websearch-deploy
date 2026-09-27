@@ -10,12 +10,14 @@ function explicitSpec(r:SearchRequest, f:any, evidence:any[]){
   if(f.class!=="functional" || !evidence.some(e=>e.source==="query" && typeof e.reference==="string" && (e.reference==="query" || r.query.toLowerCase().includes(e.reference.toLowerCase()))))return false;
   // Match the supplied numeric value AND its parameter, not just a nearby number.
   // A model's prose can identify the same value when its typed value is numeric.
-  const factor=`${f.key} ${f.description} ${String(f.value??"")}`;
+  const factor=`${f.key} ${f.description} ${typeof f.value==="object"?JSON.stringify(f.value):String(f.value??"")}`;
   const specs=[...r.query.matchAll(/\b(?:with|at least|minimum|must have|requires?)\s+(\d+(?:\.\d+)?\s*(?:GB|TB|MB|W|Wh|mAh|MP|inch(?:es)?|in))\s+(RAM|memory|storage|capacity|power|battery|size|resolution)\b/gi)];
   return specs.some(([, amount, param])=>{
     if(!amount||!param)return false;
-    const names=/^(?:ram|memory)$/i.test(param)?/\b(?:ram|memory)\b/i:new RegExp(`\\b${param}\\b`,"i");
-    return names.test(f.key) && new RegExp(amount.trim().replace(/\s+/g,"\\s*"),"i").test(factor);
+    const names=/^(?:ram|memory)$/i.test(param)?/\b(?:ram|memory)(?:_capacity)?(?:_gb)?\b/i:new RegExp(`\\b${param}\\b`,"i");
+    const numeric=amount.match(/^(\d+(?:\.\d+)?)\s*(GB|TB|MB|W|Wh|mAh|MP|inch(?:es)?|in)$/i);
+    const structured=f.value && typeof f.value==="object" && numeric && Number(f.value.value)===Number(numeric[1]) && String(f.value.unit??"").toLowerCase()===numeric[2]?.toLowerCase();
+    return names.test(f.key) && (structured || new RegExp(amount.trim().replace(/\s+/g,"\\s*"),"i").test(factor));
   });
 }
 
