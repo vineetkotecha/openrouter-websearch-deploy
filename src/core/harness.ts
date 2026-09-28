@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { fallbackManifest, type ModelManifest, type AuditVerdict } from "./architecture.js";
 import { curateParameters, curatedRequest } from "./parameter-curation.js";
 import { fallbackIntentFormation, hotelPropertySearch } from "./intent-formation.js";
 import { jevRerank } from "./jev-rerank.js";
@@ -38,17 +39,18 @@ export class SearchHarness {
     meta?.trace?.('1_request', {query:request.query, tenant_id:request.tenant_id, context:contextUsed(activeRequest),permissions:request.permissions,limits:request.limits});
     const intent=await this.writer.form?.(activeRequest)??fallbackIntentFormation(activeRequest);
     meta?.trace?.('1a_prefill_query_formation',{...formProviderQuery(activeRequest,"pre_fill"),intent});
-    const firstPass = curateParameters(activeRequest, undefined, request.curation_revision_of,intent);
+    const baseline = curateParameters(activeRequest, undefined, request.curation_revision_of,intent);
+    const firstPass = await (this.writer.parameters?.(activeRequest,intent,baseline)??Promise.resolve(fallbackManifest(baseline)));
     meta?.trace?.('1b_parameter_curation_first_pass', firstPass);
     // Stage 5 asks the calling agent to inspect only its own permitted context.
     // No mandate is written until the two fill stages are finished.
     const curated=firstPass;
-    const missing=curated.parameters.filter(p=>p.state!=="resolved"&&p.question&&p.allowed_uses.includes("ask"));
+    const missing=curated.parameters.filter(p=>p.state!=="resolved"&&p.allowed_uses.includes("ask"));
     const necessary=missing.filter(p=>p.compulsory);
     const optional=missing.filter(p=>!p.compulsory);
     meta?.trace?.('2_initial_parameter_curation',{manifest:curated,missing:missing.map(p=>p.key)});
     if(missing.length&&request.permissions.may_pull_context&&!request.caller_fill_complete){
-      const first=missing[0]!;const out=contextRequest(episode_id,{key:first.key,question:first.question},request);
+      const first=missing[0]!;const out=contextRequest(episode_id,{key:first.key,question:first.question??`What should I know about ${first.key.replace(/_/g," ")}?`},request);
       out.requested_context=missing.map(p=>({key:p.key,why:`Check permitted agent context for ${p.key}.`,accepted_sources:["caller" as const,"prior_outcome" as const],scope:request.permissions.scopes.length?request.permissions.scopes:["this_search"]}));
       out.question="Return only permitted agent-known context for the requested parameters.";out.curation_id=curated.id;
       out.how_to_answer="Caller context stage only. Do not ask the user here. Supply evidenced agent-known values, then call again with caller_fill_complete:true to grade any remainder.";
@@ -56,7 +58,8 @@ export class SearchHarness {
     }
     meta?.trace?.('4_grade_after_agent_fill',{necessary:necessary.map(p=>p.key),good_to_have:optional.map(p=>p.key)});
     if(necessary.length){
-      const first=necessary[0]!,question=necessary.map(p=>p.question).join(" "),gaps=necessary.map(p=>p.key);
+      const first=necessary[0]!,questions=await (this.writer.questions?.(activeRequest,curated)??Promise.resolve(necessary.map(p=>p.question||`What should I know about ${p.key.replace(/_/g," ")}?`)));
+      const question=questions.join(" "),gaps=necessary.map(p=>p.key);
       // A necessary user question must be handled via the caller. Neither an
       // unavailable resume store nor a declined question licenses retrieval.
       if(request.permissions.may_ask_user&&request.permissions.may_retain&&this.ask){
@@ -67,17 +70,19 @@ export class SearchHarness {
       meta?.trace?.('5_user_question_or_incomplete',out);return out;
     }
     const effective=curatedRequest(activeRequest,curated);
-    const finalMandate=await this.writer.write(effective);
+    const finalMandate=await this.writer.write(effective,curated);
+    if(curated.generation==="fallback")meta?.trace?.("parameter_generation_fallback",{reason:"Gemini parameter generation unavailable or invalid; deterministic baseline used"});
     if(intent.strategy==="across_categories")finalMandate.category="general_consumer_search";
     for(const p of curated.parameters.filter(p=>p.class==="psychological"&&p.state==="resolved"&&p.source==="query")){
       if(finalMandate.factors.some(f=>f.key===p.key&&f.class==="psychological"))continue;
-      finalMandate.factors.push({key:p.key,class:"psychological",description:`Use the stated ${p.key.replace(/_/g," ")} to rank otherwise eligible results.`,value:p.value,weight:.75,confidence:1,hard:false,evidence:[{source:"query",reference:p.evidence[0]?.reference}]});
+      finalMandate.factors.push({key:p.key,class:"psychological",description:`Use the stated ${p.key.replace(/_/g," ")} to rank otherwise eligible results.`,value:p.value,weight:p.priority/100,confidence:1,hard:false,evidence:[{source:"query",reference:p.evidence[0]?.reference}]});
     }
     meta?.trace?.('6_final_mandate_after_fill',{id:finalMandate.id,curation_id:curated.id});
     const fillDecision={ask:[],defaults:optional.map(p=>({key:p.key,reason:"Good-to-have parameter absent; do not infer it"})),stale:curated.parameters.filter(p=>p.state==="stale").map(p=>p.key)};
     // Each decomposed job gets its own query and provider choice. The planner's
     // capability filter remains the authority for eligible providers and fallbacks.
     const plan = planJobs(effective, finalMandate, this.providers, this.health, undefined, curated);
+    try { const proposed=await this.writer.decompose?.(effective,finalMandate,plan.jobs.map(j=>({id:j.id,query:j.query??effective.query})));if(proposed)for(const job of plan.jobs)if(proposed[job.id])job.query=proposed[job.id]; } catch {plan.notes.push("Gemini decomposition unavailable; retained capability-based job plan.");}
     const branchQueries=intent.strategy==="across_categories"&&!effective.context.some(c=>canonicalContextKey(c.key)==="intent_category")?intent.search_branches:[];
     if(branchQueries.length){
       const first=plan.jobs.find(j=>j.kind==="discovery");
@@ -121,7 +126,23 @@ export class SearchHarness {
 
     // Known-URL shortcut: the URLs themselves are the candidates; no discovery spend.
     const known: ProviderResult[] = plan.classification.known_urls.map(url => ({ provider: "known_url", url, title: url, snippet: "" }));
-    const pool = [...known, ...exec.results];
+    let pool = [...known, ...exec.results];
+    const repairRuns:typeof exec.runs = [];
+    const limitations: string[] = [];
+    // Gemini checks the *entire retrieved pool* against the original query before
+    // any shortlist. Failure is explicit; hard eligibility remains a separate gate.
+    let audit:AuditVerdict[]=[];
+    const runAudit=async(items:ProviderResult[])=>{if(!this.writer.audit||!items.length)return [] as AuditVerdict[];try{return await this.writer.audit(effective,finalMandate,items)}catch{limitations.push("Gemini correctness audit unavailable; source checks and hard gates remain, but the full model audit was not completed.");return [] as AuditVerdict[]}};
+    audit=await runAudit(pool);
+    // One bounded repair is attempted only when the first retrieval is empty or
+    // every candidate visibly fails the model check, and remaining provider budget allows it.
+    if(this.writer.audit&&(!pool.length||audit.length&&audit.every(x=>x.state==="fail"))&&exec.runs.length<request.limits.max_provider_calls){
+      const failedProviders=new Set(exec.runs.map(x=>x.provider));
+      const repair=plan.jobs.flatMap(j=>j.candidates.filter(c=>!c.excluded&&!failedProviders.has(c.provider)).map(c=>({job:j,provider:c.provider}))).find(x=>this.providers.some(p=>p.name===x.provider&&p.enabled()));
+      if(repair){const provider=this.providers.find(p=>p.name===repair.provider)!;const run=await call(provider,repair.job);repairRuns.push({job:repair.job.id,provider:repair.provider,role:"fallback",latency_ms:run.latency_ms,status:run.status,result_count:run.results.length});if(run.status==="ok"&&run.results.length){pool=[...pool,...run.results];audit=await runAudit(pool);limitations.push(`One targeted repair used ${repair.provider}; no further repair calls were made.`)}else limitations.push(`One targeted repair with ${repair.provider} did not add results.`)}
+    }
+    // Keep all retrieval records for the one final Jev pass, even model-rejected
+    // records. Eligibility determines what can be returned, not what is scored.
     // Staged gate: triage on snippets first, then extract only the survivors.
     const earlyGate=gateResults(effective,finalMandate,pool);
     const eligiblePool=earlyGate.retained.map(x=>x.result);
@@ -135,7 +156,6 @@ export class SearchHarness {
     const rest = eligiblePool.filter(x => !known_first.includes(x));
     meta?.trace?.('8_extraction',{report,extracted:extracted.map(x=>({provider:x.provider,url:x.url,title:x.title,fields:x.fields})),untriaged_count:rest.length});
 
-    const limitations: string[] = [];
     if(branchQueries.length){
       const attempted=exec.runs.filter(run=>run.job.startsWith("category_")).map(run=>branchQueries[Number(run.job.slice(9))-1]?.category).filter(Boolean);
       limitations.push(attempted.length?`Category was not specified; searched across ${[...new Set(attempted)].join(", ")} rather than assuming one.`:"Category was ambiguous, but no provider could search the alternate categories; results may miss whole categories.");
@@ -144,6 +164,7 @@ export class SearchHarness {
     const anyEnabled = this.providers.some(p => p.enabled());
     if (!anyEnabled && !known.length) limitations.push("No provider key is configured; returning an empty ranked set.");
 
+    if(curated.generation==="fallback"&&this.writer.parameters)limitations.push("Gemini did not supply a valid full parameter set; a limited deterministic fallback was used.");
     if(curated.conflicts.length)limitations.push(`Conflicting context was not used: ${curated.conflicts.join(", ")}.`);
     const hardDisagreements=curated.parameters.filter(p=>p.hard&&p.alternatives?.length).map(p=>p.key);
     if(hardDisagreements.length)limitations.push(`Explicit hard constraints took priority over conflicting context: ${hardDisagreements.join(", ")}.`);
@@ -158,30 +179,42 @@ export class SearchHarness {
     if(/\bpeer.reviewed\b/i.test(request.query))limitations.push('Peer-review status was not checked against a journal or proceedings record; repository pages alone do not prove it.');
     if(/\b(?:buy|available|under [₹$€£]|price)\b/i.test(request.query))limitations.push('Current price, stock and purchasability were not verified against a merchant listing.');
     if(/\b(?:latest|open now|today|current)\b/i.test(request.query))limitations.push('Freshness, current hours or publication date were not independently verified.');
+    // Audit the full pool again with extracted source evidence, not only snippets.
+    // Keep records that failed early triage in the audit; they cannot be promoted by it.
+    const extractedByUrl=new Map(extracted.map(x=>[x.url,x]));
+    const sourceAudit=await runAudit(pool.map(x=>extractedByUrl.get(x.url)??x));
+    if(sourceAudit.length)audit=sourceAudit;
     const firstJob = plan.jobs[0];
     const lateGate=gateResults(effective,finalMandate,[...extracted, ...rest]);
     const verification=new Map(lateGate.retained.map(x=>[x.result.url,x.verification]));
-    const initialRank=rank(finalMandate, lateGate.retained.map(x=>x.result), Math.max(5, request.limits.max_results));
+    // The audit sees the complete retrieved pool, not a preselected top-eight shortlist.
+    const veto=new Set(audit.filter(x=>x.state==="fail").map(x=>x.url));
+    const uncertain=audit.filter(x=>x.state==="uncertain").length;
+    if(uncertain)limitations.push(`${uncertain} source candidates had uncertain Gemini verdicts; they were not treated as verified.`);
+    const rankedAll=[...extracted,...rest,...pool.filter(x=>earlyGate.excluded.some(e=>e.url===x.url))].flatMap(x=>rank(finalMandate,[x],1));
+    const allowed=new Set(lateGate.retained.map(x=>x.result.url).filter(url=>!veto.has(url)));
+    const initialRank=rankedAll.map(x=>allowed.has(x.url)?x:{...x,faithfulness:{state:"unverified" as const,score:x.faithfulness.score}});
     meta?.trace?.('9_initial_rank',initialRank);
     const reranked=await jevRerank(effective,finalMandate,initialRank);
+    if(reranked.reason!=="reranked")limitations.push(`Jev rerank not completed: ${reranked.reason}.`);
     meta?.trace?.('10_jev_rerank',reranked);
     const response: SearchResponse = {
       status: "complete", episode_id,
-      results: reranked.results.slice(0,5).map(x=>({...x,verification:verification.get(x.url)??{},citations:[{url:x.url,claim:x.title,support:x.faithfulness.state,kind:"source_claim" as const}]})),
-      route: exec.runs.map(x => ({ provider: x.provider, latency_ms: x.latency_ms, status: x.status, result_count: x.result_count })),
+      results: reranked.results.filter(x=>allowed.has(x.url)).slice(0,5).map(x=>({...x,verification:verification.get(x.url)??{},citations:[{url:x.url,claim:x.title,support:x.faithfulness.state,kind:"source_claim" as const}]})),
+      route: [...exec.runs,...repairRuns].map(x => ({ provider: x.provider, latency_ms: x.latency_ms, status: x.status, result_count: x.result_count })),
       limitations,
       route_decision: {
         task_class: plan.classification.query_class,
         policy: firstJob?.routing_policy ? `jobs-v1+${firstJob.routing_policy}` : "jobs-v1",
         candidates: (firstJob?.candidates ?? []).map(x => ({ provider: x.provider, score: x.score, reason: x.excluded ? `excluded: ${x.excluded}` : Object.entries(x.terms).map(([k, v]) => `${k} ${v}`).join(", ") })),
-        selected: [...new Set(exec.runs.map(x => x.provider))],
+        selected: [...new Set([...exec.runs,...repairRuns].map(x => x.provider))],
       },
       retention_until: request.permissions.may_retain ? new Date(Date.now() + 30 * 864e5).toISOString() : undefined,
       plan: {
         version: 1, query_class: plan.classification.query_class, ladder: plan.classification.ladder, signals: plan.classification.signals,
         budget: plan.budget, jobs: plan.jobs.map(j => ({ id: j.id, kind: j.kind, query:j.query, routing_policy:j.routing_policy, primary: j.primary, fallback: j.fallback, reason: j.reason, priority:j.priority, factor_keys:j.factor_keys, candidates: j.candidates })),
-        runs: exec.runs, fallback_used: exec.fallback_used, escalated: exec.escalated, skipped: exec.skipped,
-        known_urls: plan.classification.known_urls, extraction: report, context: contextUsed(effective), curation:curated, eligibility:{excluded:[...earlyGate.excluded,...lateGate.excluded],retained:lateGate.retained.length}, formation:{first:firstPass.formed_query,post:formed.provider_query,revision_of:request.curation_revision_of,used_keys:formed.context_keys}, gaps: finalMandate.gaps.map(g => ({ key: g.key, material: g.material })), fill: plan.classification.structured_fields.length ? fillSummary(plan.classification.structured_fields, extracted.map(x => (x as any).fields)) : undefined, notes: [...plan.notes,...fillDecision.defaults.map(x=>`default:${x.key} - ${x.reason}`),`jev_rerank: ${reranked.successful}/${reranked.attempted}; ${reranked.reason}; ${reranked.latency_ms} ms; tokens ${reranked.usage.input_tokens}/${reranked.usage.output_tokens}`],
+        runs: [...exec.runs,...repairRuns], fallback_used: exec.fallback_used, escalated: exec.escalated, skipped: exec.skipped,
+        known_urls: plan.classification.known_urls, extraction: report, context: contextUsed(effective), curation:curated, eligibility:{excluded:[...earlyGate.excluded,...lateGate.excluded],retained:allowed.size,audit}, formation:{first:firstPass.formed_query,post:formed.provider_query,revision_of:request.curation_revision_of,used_keys:formed.context_keys}, gaps: finalMandate.gaps.map(g => ({ key: g.key, material: g.material })), fill: plan.classification.structured_fields.length ? fillSummary(plan.classification.structured_fields, extracted.map(x => (x as any).fields)) : undefined, notes: [...plan.notes,...fillDecision.defaults.map(x=>`default:${x.key} - ${x.reason}`),`jev_rerank: ${reranked.successful}/${reranked.attempted}; ${reranked.reason}; ${reranked.latency_ms} ms; tokens ${reranked.usage.input_tokens}/${reranked.usage.output_tokens}`],
       },
     };
     meta?.trace?.('11_response',response);

@@ -8,7 +8,7 @@ const store=readFileSync(resolve('src/storage/postgres.ts'),'utf8');
 const migration=readFileSync(resolve('migrations/0007_vineet_builder_admin.sql'),'utf8');
 describe('builder context write policy',()=>{
  it('requires both builder-admin role and context:write scope for both mutations',()=>{
-   expect(app.match(/p\.role!=="admin"\|\|!p\.scopes\.some\(scope=>scope==="context:write"\|\|scope==="\*"\)/g)).toHaveLength(2);
+   expect(app.match(/p\.role!=="admin"\|\|!p\.scopes\.some\(scope=>scope==="context:write"\|\|scope==="\*"\)/g)).toHaveLength(3);
  });
  it('grants the initial builder owner the admin role and a scoped key',()=>{
    expect(store).toContain("VALUES($1,$2,$3,$4,$5,'admin')");
