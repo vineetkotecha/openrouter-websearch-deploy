@@ -44,3 +44,14 @@ it("defaults hosted MCP requests to non-retention",async()=>{
  await createMcpServer(h,{tenantId:"real-tenant",role:"user",scopes:["mcp"]}).connect(a);const cl=new Client({name:"c",version:"1"});await cl.connect(b);
  const r:any=await cl.callTool({name:"personalized_web_search",arguments:{query:"quiet laptop"}});expect(r.isError).toBeFalsy();expect(store.episodes.size).toBe(0);await cl.close();
 });
+
+import {it as outcomeIt,expect as outcomeExpect,vi as outcomeVi} from 'vitest';
+outcomeIt('exposes a builder-scoped MCP outcome tool and passes the explicit event to the scoped recorder',async()=>{
+ const[a,b]=InMemoryTransport.createLinkedPair();const record=outcomeVi.fn(async()=>true);const h=harness();
+ await createMcpServer(h,{tenantId:'real-tenant',role:'admin',scopes:['mcp']},undefined,undefined,record).connect(a);
+ const cl=new Client({name:'outcome-test',version:'1'});await cl.connect(b);
+ const tool=(await cl.listTools()).tools.find(x=>x.name==='record_search_outcome');outcomeExpect(tool).toBeTruthy();
+ const event={episode_id:'10000000-0000-4000-8000-000000000001',event_id:'20000000-0000-4000-8000-000000000001',type:'selected',result_url:'https://example.com/a',occurred_at:'2026-09-28T00:00:00Z'};
+ const r:any=await cl.callTool({name:'record_search_outcome',arguments:event});outcomeExpect(r.isError).toBeFalsy();outcomeExpect(record).toHaveBeenCalledTimes(1);outcomeExpect(record.mock.calls[0][1]).toMatchObject(event);
+ await cl.close();
+});

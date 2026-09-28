@@ -225,6 +225,8 @@ export type PlannedJob = {
   reason: string;
   priority?: number;
   factor_keys?: string[];
+  query?: string;
+  routing_policy?: string;
 };
 
 export type JobPlan = { version: 1; classification: Classification; budget: Budget; jobs: PlannedJob[]; notes: string[] };

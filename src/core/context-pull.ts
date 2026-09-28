@@ -5,7 +5,7 @@ import { hotelPropertySearch } from "./intent-formation.js";
 import type { Mandate, SearchRequest } from "../contracts/search.js";
 
 export type ContextRequest = {
-  status: "needs_input"; kind: "context_request"; episode_id: string; gap: string; question: string;
+  status: "needs_input"; kind: "context_request" | "user_question"; episode_id: string; gap: string; question: string;
   requested_context: { key: string; why: string; accepted_sources: ("caller" | "human" | "prior_outcome")[]; scope: string[] }[];
   how_to_answer: string; curation_id?: string; remaining_user_question?: string;
 };
@@ -22,8 +22,9 @@ const BUY = /\b(buy|purchase|shop|order|price|cheap|deal|under \$?[0-9])\b/i;
 export function heuristicGaps(r: SearchRequest): Mandate["gaps"] {
   const has = (k: RegExp) => r.context.some(c => (!c.expires_at||Date.parse(c.expires_at)>Date.now())&&(!c.allowed_uses||c.allowed_uses.includes("search"))&&c.class!=="psychological"&&(k.test(c.key)||k.test(canonicalContextKey(c.key)))&&c.value!=null&&String(c.value).trim()!=="") || Object.entries(r.hard_constraints).some(([key,value]) => k.test(key)&&value!=null&&String(value).trim()!=="");
   const gaps: Mandate["gaps"] = [];
-  // Broad shopping requests need the intended use before the result set is meaningful.
-  if (/\bbest laptop\b/i.test(r.query) && !has(/^(use_case|purpose|usage)/i))
+  // Only a broad choice with no stated use needs this fill. A specified
+  // office/gaming/coding use case is already an answer, not another question.
+  if (/\bbest laptop\b/i.test(r.query) && !/\b(?:for|to)\s+(?:[\w-]+\s+){0,2}(?:gaming|coding|office|work|study|travel|school|editing|photography)\b/i.test(r.query) && !has(/^(use_case|purpose|usage)/i))
     gaps.push({ key: "use_case", material: true, question: "What will the laptop be used for?" });
   if (/\bweekend trip\b/i.test(r.query) && !has(/^(origin|departure|location|city)/i))
     gaps.push({ key: "origin", material: true, question: "Where would you leave from?" });
@@ -46,8 +47,8 @@ export function contextRequest(episode_id: string, gap: { key: string; question?
   return {
     status: "needs_input", kind: "context_request", episode_id, gap: gap.key,
     question: gap.question ?? `Provide ${gap.key}.`,
-    requested_context: [{ key: gap.key, why: `Material to the result set: ${gap.question ?? gap.key}`, accepted_sources: ["caller", "human", "prior_outcome"], scope: r.permissions.scopes.length ? r.permissions.scopes : ["this_search"] }],
-    how_to_answer: `Check permitted caller context first. If unavailable, ask the user one batched question for remaining material keys. Call search again with the same query, curation_revision_of, caller_fill_complete:true and evidenced context answers. Send only what the user allowed you to share; omit an optional fact rather than guess.`,
+    requested_context: [{ key: gap.key, why: `Material to the result set: ${gap.question ?? gap.key}`, accepted_sources: ["caller", "prior_outcome"], scope: r.permissions.scopes.length ? r.permissions.scopes : ["this_search"] }],
+    how_to_answer: `Check permitted caller context only. Do not ask the user at this stage. Call search again with the same query, curation_revision_of, caller_fill_complete:true and evidenced caller answers; the harness will grade remaining gaps.`,
   };
 }
 

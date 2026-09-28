@@ -2,6 +2,7 @@ import {noul,TypeSafeClient} from "@typesafe-ai/sdk";
 import type {Mandate,SearchRequest,SearchResponse} from "../contracts/search.js";
 type Ranked=SearchResponse["results"][number];
 type Scorer=(r:SearchRequest,m:Mandate,x:Ranked)=>Promise<number>;
+export const evidencedDecisionFactors=(m:Mandate)=>m.factors.filter(f=>f.class==="psychological"&&!f.hard&&f.value!=null&&f.evidence.some(e=>!!e.reference)).map(f=>({key:f.key,value:f.value,weight:f.weight,confidence:f.confidence,evidence:f.evidence.map(e=>({source:e.source,reference:e.reference}))}));
 const eligible=(m:Mandate,x:Ranked)=>{
   // A failed explicit structured field or evidence gate is never promoted.
   if(x.faithfulness.state==="unverified")return false;
@@ -21,9 +22,9 @@ export async function jevRerank(r:SearchRequest,m:Mandate,items:Ranked[],score?:
   if(score){graded=await Promise.all(indices.map(async i=>{try{return{i,value:await score(r,m,short[i]!)}}catch{return{i,value:NaN}}}));}
   else {
     try {
-      const questions=Object.fromEntries(indices.map((i)=>[`fit_${i}`,noul(`Does candidate ${i} directly serve the mandate while respecting the stated constraints?`,{true:"Direct and supported fit",false:"Tangential, contradictory or unsupported"})]));
+      const questions=Object.fromEntries(indices.map((i)=>[`fit_${i}`,noul(`Does candidate ${i} directly serve the mandate and its evidenced decision preferences while respecting the stated constraints?`,{true:"Direct, supported and preferred fit",false:"Tangential, contradictory or unsupported"})]));
       const candidates=indices.map(i=>({id:i,title:short[i]!.title,snippet:short[i]!.snippet.slice(0,800),reason:short[i]!.reason,faithfulness:short[i]!.faithfulness}));
-      const out=await client!.systemOne({model:process.env.JEV_MODEL??"jev-1.13.0",state:{query:r.query,intent:m.intent,hard_constraints:JSON.parse(JSON.stringify(r.hard_constraints)),candidates},questions});
+      const out=await client!.systemOne({model:process.env.JEV_MODEL??"jev-1.13.0",state:{query:r.query,intent:m.intent,hard_constraints:JSON.parse(JSON.stringify(r.hard_constraints)),decision_factors:JSON.parse(JSON.stringify(evidencedDecisionFactors(m))),candidates},questions});
       input_tokens=out.usage.input_tokens||0;output_tokens=out.usage.output_tokens||0;
       graded=indices.map(i=>({i,value:(out.answers as any)[`fit_${i}`]?.noul??NaN}));
     }catch{graded=indices.map(i=>({i,value:NaN}));}

@@ -35,8 +35,7 @@ describe("calling-agent context pull", () => {
     let calls=0; const provider={ name:"exa", enabled:()=>true, search:async()=>{calls++;return []} };
     const harness=new SearchHarness({ SEARCH_TIMEOUT_MS:1000 } as any,writer,[provider as any],new MemoryStore());
     const out:any=await harness.search(req({query:"pharmacy near me open now",country:"IN"}));
-    expect(out.status).toBe("complete"); expect(out.results).toEqual([]); expect(calls).toBe(0);
-    expect(out.limitations.join(" ")).toMatch(/Location is required/);
+    expect(out.status).toBe("needs_input"); expect(out.requested_context.map((x:any)=>x.key)).toContain("location"); expect(calls).toBe(0);
   });
 });
 import { formProviderQuery, localizeQuery } from "../src/core/context-pull.js";
@@ -51,7 +50,7 @@ describe("pulled location reaches providers", () => {
 it("skips mandate generation as well as provider calls for an unlocated local query",async()=>{
  let calls=0; const w:any={write:async()=>{calls++;throw new Error("should not be called")}};
  const out:any=await new SearchHarness({ SEARCH_TIMEOUT_MS:1000 } as any,w,[],new MemoryStore()).search(req({query:"pharmacy near me open now"}));
- expect(out.status).toBe("complete");expect(out.results).toEqual([]);expect(calls).toBe(0);
+ expect(out.status).toBe("needs_input");expect(out.requested_context.map((x:any)=>x.key)).toContain("location");expect(calls).toBe(0);
 });
 
 describe('alias-safe caller fill',()=>{

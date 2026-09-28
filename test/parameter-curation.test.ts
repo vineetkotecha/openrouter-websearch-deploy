@@ -11,7 +11,7 @@ describe("curation and two-stage fill",()=>{
   const write=vi.fn(async(r:any)=>new HeuristicMandateWriter().write(r));const h=harness({write});const r=req({permissions:{may_pull_context:true}});
   const first:any=await h.search(r);expect(first.kind).toBe("context_request");expect(first.curation_id).toMatch(/[a-f0-9-]{36}/);expect(first.requested_context.map((x:any)=>x.key)).toEqual(["use_case"]);
   const second:any=await h.search(req({permissions:{may_pull_context:true},caller_fill_complete:true,curation_revision_of:first.curation_id,context:[{key:"use_case",value:"coding",source:"caller",confidence:.95,evidence:[{source:"caller",reference:"user-agent:42"}]}]}));
-  expect(second.status).toBe("complete");expect(write).toHaveBeenCalledTimes(2);expect(second.plan.curation.revision_of).toBe(first.curation_id);expect(second.plan.formation.post).toBe("best laptop for coding");expect(second.plan.curation.parameters.find((x:any)=>x.key==="use_case").source).toBe("caller");
+  expect(second.status).toBe("complete");expect(write).toHaveBeenCalledTimes(1);expect(second.plan.curation.revision_of).toBe(first.curation_id);expect(second.plan.formation.post).toBe("best laptop for coding");expect(second.plan.curation.parameters.find((x:any)=>x.key==="use_case").source).toBe("caller");
  });
  it("does not promote a model-invented gap, budget, or unevidenced human trait to a blocking factor",async()=>{
   const w={write:async(r:any)=>({...await new HeuristicMandateWriter().write(r),gaps:[{key:"mystery_trait",material:true,question:"Tell us your trait?"}]})};
@@ -56,4 +56,44 @@ it("does not launder a model's invented rating into the curated record from a br
  const r=req({query:"best laptop"}),m=await new HeuristicMandateWriter().write(r);
  m.factors.push({key:"average_user_rating",class:"functional",description:"At least four stars",value:4,weight:.8,confidence:.7,hard:false,evidence:[{source:"query",reference:"best laptop"}]});
  expect(curateParameters(r,m).parameters.some(x=>x.key==="average_user_rating")).toBe(false);
+});
+
+
+describe('two-function search choices',()=>{
+ it('asks caller about choice-changing hotel context without inventing a preference or hard filter',async()=>{
+  const r=req({query:'best hotel in Jaipur',permissions:{may_pull_context:true}});const out:any=await harness().search(r);
+  expect(out.kind).toBe('context_request');expect(out.requested_context.map((x:any)=>x.key)).toEqual(['travel_party','trip_purpose']);
+  const manifest=curateParameters(r,undefined,undefined,await new HeuristicMandateWriter().form(r));
+  for(const key of ['travel_party','trip_purpose'])expect(manifest.parameters.find(p=>p.key===key)).toMatchObject({class:'psychological',state:'missing',hard:false,effect:'ranking',compulsory:true});
+  expect(manifest.parameters.filter(p=>p.class==='psychological'&&p.state==='resolved')).toHaveLength(0);
+  const later:any=await harness().search(req({query:'best hotel in Jaipur',permissions:{may_pull_context:true},caller_fill_complete:true}));
+  expect(later.status).toBe('needs_input');expect(later.requested_context.map((x:any)=>x.key)).toEqual(['travel_party','trip_purpose']);expect(later.requested_context.every((x:any)=>x.accepted_sources.includes('human'))).toBe(true);
+ });
+ it('uses evidenced caller preference only for ranking and does not re-ask it',async()=>{
+  const r=req({query:'best hotel in Jaipur',permissions:{may_pull_context:true},context:[{key:'travel_party',class:'psychological',value:'family',source:'caller',confidence:.95,evidence:[{source:'caller',reference:'caller-message-1'}],allowed_uses:['rerank']},{key:'trip_purpose',class:'psychological',value:'leisure',source:'caller',confidence:.95,evidence:[{source:'caller',reference:'caller-message-1'}],allowed_uses:['rerank']} ]});
+  const out:any=await harness().search(r);expect(out.status).toBe('complete');
+  for(const key of ['travel_party','trip_purpose'])expect(out.plan.curation.parameters.find((p:any)=>p.key===key)).toMatchObject({state:'resolved',hard:false,effect:'ranking'});
+ });
+ it('uses an explicit party from the query as a soft ranking preference, never as a hard gate',async()=>{const out:any=await harness().search(req({query:'best family hotel in Jaipur',permissions:{may_pull_context:true},caller_fill_complete:true}));expect(out.status).toBe('needs_input');expect(out.requested_context.map((x:any)=>x.key)).toEqual(['trip_purpose']);const p=curateParameters(req({query:'best family hotel in Jaipur'})).parameters.find(p=>p.key==='travel_party');expect(p).toMatchObject({value:'family',source:'query',hard:false,effect:'ranking'})});
+ it('does not interrupt a constrained property search for unprovided human preferences',async()=>{const out:any=await harness().search(req({query:'hotel property in Jaipur under ₹1800',permissions:{may_pull_context:true}}));expect(out.status).toBe('complete');expect(out.plan.curation.parameters.some((p:any)=>p.class==='psychological'&&p.compulsory)).toBe(false)});
+});
+
+it('separates caller-only fill from a later user question and blocks unfilled retrieval',async()=>{
+ const events:string[]=[];let providerCalls=0;const write=vi.fn(async(r:any)=>new HeuristicMandateWriter().write(r));
+ const h=harness({write},[{name:'exa',enabled:()=>true,search:async()=>{providerCalls++;return []}}]);
+ h.ask=async()=>{events.push('ask');return{resume_token:'dvr_test'}};
+ const r=req({query:'best hotel in Jaipur',permissions:{may_pull_context:true,may_ask_user:true,may_retain:true}});
+ const first:any=await h.search(r,{trace:(stage)=>events.push(stage)});
+ expect(first.kind).toBe('context_request');expect(first.requested_context.every((x:any)=>!x.accepted_sources.includes('human'))).toBe(true);
+ expect(first.question).not.toMatch(/who is this|purpose of the stay/i);
+ expect(events).not.toContain('ask');expect(write).not.toHaveBeenCalled();expect(providerCalls).toBe(0);
+ const second:any=await h.search(req({query:'best hotel in Jaipur',caller_fill_complete:true,permissions:{may_pull_context:true,may_ask_user:true,may_retain:true}}));
+ expect(second.kind).toBe('user_question');expect(second.gaps).toEqual(['travel_party','trip_purpose']);expect(events).toContain('ask');expect(write).not.toHaveBeenCalled();expect(providerCalls).toBe(0);
+});
+
+it('does not leak an unreferenced agent-understanding factor into the final mandate or ranking',async()=>{
+ const r=req({query:'laptop offers',agent_understanding:{source:'user_agent',psychological_parameters:[{key:'imagined_style',value:'flashy',confidence:.9,evidence:[{source:'caller'}]}]}});
+ const manifest=curateParameters(r);expect(manifest.parameters.some(p=>p.key==='imagined_style')).toBe(false);
+ expect(curatedRequest(r,manifest).agent_understanding?.psychological_parameters).toEqual([]);
+ const out:any=await harness().search(r);expect(out.status).toBe('complete');expect(out.plan.curation.parameters.some((p:any)=>p.key==='imagined_style')).toBe(false);
 });

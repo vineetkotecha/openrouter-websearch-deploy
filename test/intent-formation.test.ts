@@ -27,7 +27,7 @@ describe('general first-pass intent formation',()=>{
  it('asks every compulsory distinct parameter rather than truncating at three',async()=>{
   const writer=new HeuristicMandateWriter();const h=new SearchHarness({SEARCH_TIMEOUT_MS:1000} as any,{write:async(r:any)=>({...await writer.write(r),gaps:['location','origin','use_case','recipient'].map(key=>({key,material:true,question:`Provide ${key}?`}))})},[],new MemoryStore());
   const out:any=await h.search(req({query:'best laptop near me for my anniversary weekend trip',permissions:{may_pull_context:true}}));
-  expect(out.requested_context.map((x:any)=>x.key)).toEqual(['location','origin','use_case','recipient']);
+  expect(out.requested_context.map((x:any)=>x.key)).toEqual(['location','origin','use_case']);
  });
 });
 

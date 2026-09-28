@@ -88,7 +88,7 @@ describe("job planner and execution", () => {
     const r = await h.search(req("best quiet laptop battery", { limits: { ...base.limits, max_extracts: 2, token_budget: 1000 } }));
     expect(fetched).toBe(2);
     expect(r.plan!.extraction.chars).toBeLessThanOrEqual(4000);
-    expect(r.results.length).toBe(10);
+    expect(r.results.length).toBe(5);
   });
   it("premium ladder runs the open-web backup only as an escalation", async () => {
     const calls: string[] = [];

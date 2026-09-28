@@ -22,6 +22,10 @@ const nonempty = (v: unknown) => v !== undefined && v !== null && String(v).trim
 const allow = (c: SearchRequest["context"][number]) => c.allowed_uses?.length ? c.allowed_uses : ["search", "rerank", "ask"] as ("search" | "rerank" | "ask")[];
 const materialKeys = new Set(["location", "origin", "use_case", "recipient"]);
 const humanOnly = (c: SearchRequest["context"][number]) => c.class === "psychological";
+// These are questions, not inferred values. Ask only for an open-ended choice
+// where different answers could reverse which eligible option wins.
+const openChoice=(r:SearchRequest)=>/\b(?:best|recommend|choose|pick|which)\b/i.test(r.query)&&!r.category_hint;
+const hotelChoice=(r:SearchRequest)=>openChoice(r)&&/\b(?:hotels?|stays?|lodg(?:ing|es?))\b/i.test(r.query);
 const sensitive = (key:string) => /(?:religion|race|ethnic|gender|sexual|disability|health|medical|politic|age|income|credit|biometric)/i.test(key);
 // A direct quote or caller's own understanding with a reference is required for a human factor.
 // A query alone, an unreferenced profile, or a model hypothesis cannot create one.
@@ -53,6 +57,15 @@ export function curateParameters(r: SearchRequest, m?: Mandate, revision_of?: st
     const key=canonicalContextKey(p.key);if(slots.has(`psychological:${key}`))continue;
     put({key,class:"psychological",value:p.value,state:"resolved",source:"caller",evidence:p.evidence,confidence:p.confidence,allowed_uses:["rerank"],hard:false,material:false,priority:10,effect:"ranking"});
   }
+  if(hotelChoice(r)) for(const [key,question] of [
+    ["travel_party","Who is this stay for (solo, business, family, or someone else)?"],
+    ["trip_purpose","What is the main purpose of the stay?"],
+  ] as const){
+    const supplied=[...slots.values()].some(p=>p.state==="resolved"&&p.class==="psychological"&&p.key===key);
+    const statedValue=key==="travel_party"?r.query.match(/\b(solo|alone|family|with (?:kids|children|partner|friends|colleagues))\b/i)?.[0]:r.query.match(/\b(business|work trip|conference|vacation|holiday|leisure)\b/i)?.[0];
+    if(!supplied&&statedValue)put({key,class:"psychological",value:statedValue,state:"resolved",source:"query",evidence:[{source:"query",reference:statedValue}],confidence:1,allowed_uses:["rerank"],hard:false,material:false,priority:30,effect:"ranking"});
+    else if(!supplied)put({key,class:"psychological",state:"missing",evidence:[],confidence:0,allowed_uses:["rerank","ask"],hard:false,material:true,priority:80,effect:"ranking",question});
+  }
   if(intent?.category_state==="ambiguous"&&!r.category_hint){
     put({key:"intent_category",class:"functional",state:"missing",evidence:[],confidence:0,allowed_uses:["search","ask"],hard:false,material:false,priority:40,effect:"retrieval",question:`Which kind of result would you like? ${intent.intent_space.map(x=>x.category).join(", ")}?`});
   }
@@ -61,7 +74,7 @@ export function curateParameters(r: SearchRequest, m?: Mandate, revision_of?: st
     put({key:g.key,class:"functional",state:"missing",evidence:[],confidence:0,allowed_uses:["search","ask"],hard:false,material:false,priority:g.result_changing?55:20,effect:"retrieval",question:g.question});
   }
   for(const h of intent?.candidate_human_factors??[]){
-    if(slots.has(`psychological:${h.key}`))continue;
+    if(slots.has(`psychological:${h.key}`)||sensitive(h.key))continue;
     put({key:h.key,class:"psychological",state:"missing",evidence:[],confidence:0,allowed_uses:["rerank","ask"],hard:false,material:false,priority:10,effect:"ranking",question:h.question});
   }
   // Model-authored values never become curated facts just because a broad query
@@ -78,5 +91,8 @@ export function curateParameters(r: SearchRequest, m?: Mandate, revision_of?: st
 }
 export function curatedRequest(r:SearchRequest, manifest:CuratedParameterManifest):SearchRequest {
   const selected=new Map(manifest.parameters.filter(p=>p.state==="resolved"&&!p.hard).map(p=>[`${p.class}:${p.key}`,p]));
-  return {...r,context:r.context.filter(c=>{const p=selected.get(`${c.class==="psychological"?"psychological":"functional"}:${canonicalContextKey(c.key)}`);return p&&p.source===c.source&&equal(p.value,c.value)&&(!c.expires_at||Date.parse(c.expires_at)>Date.now())&&(!c.allowed_uses||c.allowed_uses.includes("search")||c.allowed_uses.includes("rerank"))})};
+  return {...r,
+    context:r.context.filter(c=>{const p=selected.get(`${c.class==="psychological"?"psychological":"functional"}:${canonicalContextKey(c.key)}`);return p&&p.source===c.source&&equal(p.value,c.value)&&(!c.expires_at||Date.parse(c.expires_at)>Date.now())&&(!c.allowed_uses||c.allowed_uses.includes("search")||c.allowed_uses.includes("rerank"))}),
+    agent_understanding:r.agent_understanding?{...r.agent_understanding,psychological_parameters:r.agent_understanding.psychological_parameters.filter(x=>{const p=selected.get(`psychological:${canonicalContextKey(x.key)}`);return p?.source==="caller"&&equal(p.value,x.value)&&p.evidence.some(e=>!!e.reference)})}:undefined,
+  };
 }
