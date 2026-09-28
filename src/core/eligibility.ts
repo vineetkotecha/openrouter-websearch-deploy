@@ -6,6 +6,7 @@ export type Eligibility={eligible:boolean;reasons:string[];verification:Record<s
 const listingPath=/(?:list-of-|\/listings?\/|\/search(?:[/?]|$)|\/s\/|\/stays\/|\/hotels-(?:in|near)-|\/hotels\/[^/?]+(?:[/?]|$))/i;
 const collectionTitle=/\b(?:best|budget|cheap|top|list of|hotels|products|items|stores|people)\b.*\b(?:hotels?|products?|items?|near|in)\b/i;
 const hotelName=/\b(?:hotel|fabhotel|treebo|oyo|collection o|olive zip|xotel|residency|inn|suites|rooms|stay)\b/i;
+const productCollectionTitle=/\b(?:best|top|cheap|budget|list of|deals? on|buy|shop)\b.*\b(?:laptops?|phones?|shoes?|chargers?|headphones?|earbuds?|jackets?|toys?)\b|\b(?:laptops?|phones?|shoes?|chargers?|headphones?|earbuds?|jackets?|toys?)\b.*\b(?:under|collection|list|deals?|on sale|compare|202[0-9])\b/i;
 const socialOrEditorial=/\b(?:facebook|instagram|youtube|tiktok|reddit|quora|pinterest)\.com$/i;
 const amount=(v:unknown):number|null=>{if(typeof v==='number')return Number.isFinite(v)?v:null;const s=String(v??'').replace(/,/g,'');const m=s.match(/(?:₹|Rs\.?|INR|\$)\s*(\d+(?:\.\d+)?)/i)??s.match(/^\s*(\d+(?:\.\d+)?)\s*$/);return m?Number(m[1]!):null};
 const supportedField=(x:ProviderResult,key:RegExp)=>Object.entries(x.fields??{}).find(([k,v])=>key.test(k)&&v.state==='supported'&&v.value!==null);
@@ -19,6 +20,8 @@ export function eligibility(r:SearchRequest,m:Mandate,x:ProviderResult):Eligibil
   if(strategy.unit==='hotel_property'){
    if(listingPath.test(url.pathname)||collectionTitle.test(title)&&!/^\s*(?:fabhotel|treebo|oyo|collection o|olive zip|xotel)\b/i.test(title))reasons.push('collection page, not an individual hotel');
    if(!hotelName.test(title)||/^(?:this|the|a|our)\s+hotel\b|\bthis hotel\b/i.test(title)||/^[+\d\s()\-]{8,}/.test(title))reasons.push('no named hotel property in result title');
+  }else if(strategy.unit==='product'){
+   if(listingPath.test(url.pathname)||productCollectionTitle.test(title))reasons.push('collection page, not an individual product');
   }else if(listingPath.test(url.pathname)||collectionTitle.test(title))reasons.push('collection page, not an individual answer');
   verification[strategy.unit]={status:'unverified',...(reasons.length?{}:{evidence:`entity-shaped title: ${x.title}`})};
  }
