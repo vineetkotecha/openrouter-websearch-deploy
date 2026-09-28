@@ -14,7 +14,7 @@ export async function jevRerank(r:SearchRequest,m:Mandate,items:Ranked[],score?:
   const short=items,indices=short.map((_,i)=>i);
   if(indices.length<2)return {results:items,attempted:0,successful:0,usage:{input_tokens:0,output_tokens:0},reason:"fewer_than_two_candidates",latency_ms:Date.now()-startedAt};
   if(!score&&!process.env.TYPESAFE_API_KEY)return {results:items,attempted:0,successful:0,usage:{input_tokens:0,output_tokens:0},reason:"missing_key",latency_ms:Date.now()-startedAt};
-  const client=score?null:new TypeSafeClient({apiKey:process.env.TYPESAFE_API_KEY,timeout:2500,retry:{maxRetries:0}} as any);
+  const client=score?null:new TypeSafeClient({apiKey:process.env.TYPESAFE_API_KEY,timeout:10_000,retry:{maxRetries:0}} as any);
   let input_tokens=0,output_tokens=0;
   // One Jev invocation grades every retrieved candidate together. The injectable scorer
   // remains per-item for deterministic offline tests; production never fans out.

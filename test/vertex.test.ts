@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { generateKeyPairSync, createVerify } from "node:crypto";
 import { VertexClient, parseServiceAccount, signedJwt } from "../src/core/vertex.js";
 
@@ -42,5 +42,20 @@ describe("vertex client", () => {
   it("does not walk models on an auth failure", async () => {
     const fetcher = (async () => new Response(JSON.stringify({ error: "invalid_grant" }), { status: 400 })) as unknown as typeof fetch;
     await expect(new VertexClient(saJson, "us-central1", fetcher).generate("m", "p")).rejects.toThrow(/vertex token/);
+  });
+});
+
+describe("Vertex slow response budget", () => {
+  it("gives the generation a 60-second window, keeping token minting bounded separately", async () => {
+    const original = AbortSignal.timeout;
+    const budgets: number[] = [];
+    const spy = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms: number) => { budgets.push(ms); return original(ms); });
+    try {
+      const fetcher = (async (url: string) => url.includes("oauth2")
+        ? new Response(JSON.stringify({ access_token: "t", expires_in: 3600 }))
+        : new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "{\"ok\":1}" }] } }] }))) as unknown as typeof fetch;
+      await new VertexClient(saJson, "us-central1", fetcher).generate("gemini-2.5-flash", "slow call");
+      expect(budgets).toEqual([8000, 60_000]);
+    } finally { spy.mockRestore(); }
   });
 });

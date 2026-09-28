@@ -49,7 +49,7 @@ export class VertexClient {
     const r = await this.fetcher(this.endpoint(model, location), {
       method: "POST", headers: { Authorization: `Bearer ${await this.accessToken()}`, "Content-Type": "application/json" },
       body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json", ...(temperature === undefined ? {} : { temperature }) } }),
-      signal: AbortSignal.timeout(30_000),
+      signal: AbortSignal.timeout(60_000),
     });
     const j: any = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(`vertex ${model}@${location} [${r.status}] ${String(j.error?.message ?? "").slice(0, 200)}`);
