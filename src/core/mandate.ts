@@ -31,7 +31,7 @@ export class GeminiMandateWriter implements MandateWriter{private fallback=new H
   const gen=async(name:string)=>(await new GoogleGenerativeAI(this.c.GEMINI_API_KEY!).getGenerativeModel({model:name,generationConfig:{responseMimeType:"application/json"}}).generateContent(prompt)).response.text();
   return JSON.parse(await withWorkingModel(this.c.GEMINI_API_KEY,this.c.GEMINI_MODEL,gen));
  }
- async parameters(r:SearchRequest,intent:IntentFormation,baseline:CuratedParameterManifest){try{return validateModelParameters(await this.generate(parameterPrompt(r,intent)),r,intent,baseline)}catch{return fallbackManifest(baseline)}}
+ async parameters(r:SearchRequest,intent:IntentFormation,baseline:CuratedParameterManifest){try{return validateModelParameters(await this.generate(parameterPrompt(r,intent)),r,intent,baseline)}catch(e){const reason=e instanceof Error?e.message:String(e);return {...fallbackManifest(baseline),fallback_reason:reason.slice(0,220)}}}
  async questions(r:SearchRequest,m:ModelManifest){try{return normalizeQuestions(await this.generate(questionPrompt(r,m)),m)}catch{return normalizeQuestions(null,m)}}
  async audit(r:SearchRequest,m:Mandate,items:ProviderResult[]){return normalizeAudit(await this.generate(auditPrompt(r,m,items)),items)}
  async decompose(r:SearchRequest,m:Mandate,jobs:{id:string;query:string}[]){

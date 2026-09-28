@@ -71,7 +71,7 @@ export class SearchHarness {
     }
     const effective=curatedRequest(activeRequest,curated);
     const finalMandate=await this.writer.write(effective,curated);
-    if(curated.generation==="fallback")meta?.trace?.("parameter_generation_fallback",{reason:"Gemini parameter generation unavailable or invalid; deterministic baseline used"});
+    if(curated.generation==="fallback")meta?.trace?.("parameter_generation_fallback",{reason:curated.fallback_reason??"Gemini parameter generation unavailable or invalid; deterministic baseline used"});
     if(intent.strategy==="across_categories")finalMandate.category="general_consumer_search";
     for(const p of curated.parameters.filter(p=>p.class==="psychological"&&p.state==="resolved"&&p.source==="query")){
       if(finalMandate.factors.some(f=>f.key===p.key&&f.class==="psychological"))continue;
@@ -82,7 +82,7 @@ export class SearchHarness {
     // Each decomposed job gets its own query and provider choice. The planner's
     // capability filter remains the authority for eligible providers and fallbacks.
     const plan = planJobs(effective, finalMandate, this.providers, this.health, undefined, curated);
-    try { const proposed=await this.writer.decompose?.(effective,finalMandate,plan.jobs.map(j=>({id:j.id,query:j.query??effective.query})));if(proposed)for(const job of plan.jobs)if(proposed[job.id])job.query=proposed[job.id]; } catch {plan.notes.push("Gemini decomposition unavailable; retained capability-based job plan.");}
+    try { const proposed=plan.jobs.length?await this.writer.decompose?.(effective,finalMandate,plan.jobs.map(j=>({id:j.id,query:j.query??effective.query}))):undefined;if(proposed)for(const job of plan.jobs)if(proposed[job.id])job.query=proposed[job.id]; } catch {plan.notes.push("Gemini decomposition unavailable; retained capability-based job plan.");}
     const branchQueries=intent.strategy==="across_categories"&&!effective.context.some(c=>canonicalContextKey(c.key)==="intent_category")?intent.search_branches:[];
     if(branchQueries.length){
       const first=plan.jobs.find(j=>j.kind==="discovery");
@@ -167,7 +167,7 @@ export class SearchHarness {
     const anyEnabled = this.providers.some(p => p.enabled());
     if (!anyEnabled && !known.length) limitations.push("No provider key is configured; returning an empty ranked set.");
 
-    if(curated.generation==="fallback"&&this.writer.parameters)limitations.push("Gemini did not supply a valid full parameter set; a limited deterministic fallback was used.");
+    if(curated.generation==="fallback"&&this.writer.parameters)limitations.push(`Gemini parameter generation fell back (${curated.fallback_reason??"reason unavailable"}); a limited deterministic set was used.`);
     if(curated.conflicts.length)limitations.push(`Conflicting context was not used: ${curated.conflicts.join(", ")}.`);
     const hardDisagreements=curated.parameters.filter(p=>p.hard&&p.alternatives?.length).map(p=>p.key);
     if(hardDisagreements.length)limitations.push(`Explicit hard constraints took priority over conflicting context: ${hardDisagreements.join(", ")}.`);
@@ -185,8 +185,9 @@ export class SearchHarness {
     // Audit the full pool again with extracted source evidence, not only snippets.
     // Keep records that failed early triage in the audit; they cannot be promoted by it.
     const extractedByUrl=new Map(extracted.map(x=>[x.url,x]));
-    const sourceAudit=await runAudit(pool.map(x=>extractedByUrl.get(x.url)??x));
-    if(sourceAudit.length){const previous=new Map(audit.map(v=>[v.url,v]));audit=sourceAudit.map(v=>previous.get(v.url)?.state==="fail"&&v.state!=="fail"?{...v,state:"fail" as const,reason:`First-pass audit failed: ${previous.get(v.url)!.reason}; post-extraction: ${v.reason}`}:v)}
+    const auditInputs=pool.map(x=>extractedByUrl.get(x.url)??x);
+    const sourceAudit=extractedByUrl.size?await runAudit(auditInputs):[];
+    if(sourceAudit.length){const previous=new Map(audit.map(v=>[v.url,v]));audit=sourceAudit.map(v=>previous.get(v.url)?.state==="fail"&&v.state!=="fail"&&!(previous.get(v.url)!.reason.startsWith("Temporal contradiction was not established"))?{...v,state:"fail" as const,reason:`First-pass audit failed: ${previous.get(v.url)!.reason}; post-extraction: ${v.reason}`}:v)}
     const firstJob = plan.jobs[0];
     const lateGate=gateResults(effective,finalMandate,[...extracted, ...rest]);
     const verification=new Map(lateGate.retained.map(x=>[x.result.url,x.verification]));
