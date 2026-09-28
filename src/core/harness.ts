@@ -136,11 +136,14 @@ export class SearchHarness {
     audit=await runAudit(pool);
     // One bounded repair is attempted only when the first retrieval is empty or
     // every candidate visibly fails the model check, and remaining provider budget allows it.
-    if(this.writer.audit&&(!pool.length||audit.length&&audit.every(x=>x.state==="fail"))&&exec.runs.length<request.limits.max_provider_calls){
+    const firstGate=gateResults(effective,finalMandate,pool);
+    const noViableCandidates=pool.length>0&&firstGate.retained.every(x=>audit.some(v=>v.url===x.result.url&&v.state==="fail"));
+    if((!pool.length||noViableCandidates)&&exec.runs.length<request.limits.max_provider_calls){
       const failedProviders=new Set(exec.runs.map(x=>x.provider));
       const repair=plan.jobs.flatMap(j=>j.candidates.filter(c=>!c.excluded&&!failedProviders.has(c.provider)).map(c=>({job:j,provider:c.provider}))).find(x=>this.providers.some(p=>p.name===x.provider&&p.enabled()));
-      if(repair){const provider=this.providers.find(p=>p.name===repair.provider)!;const run=await call(provider,repair.job);repairRuns.push({job:repair.job.id,provider:repair.provider,role:"fallback",latency_ms:run.latency_ms,status:run.status,result_count:run.results.length});if(run.status==="ok"&&run.results.length){pool=[...pool,...run.results];audit=await runAudit(pool);limitations.push(`One targeted repair used ${repair.provider}; no further repair calls were made.`)}else limitations.push(`One targeted repair with ${repair.provider} did not add results.`)}
+      if(repair){const provider=this.providers.find(p=>p.name===repair.provider)!;const run=await call(provider,repair.job);this.health.record(provider.name,run.status==="ok",run.status);repairRuns.push({job:repair.job.id,provider:repair.provider,role:"fallback",latency_ms:run.latency_ms,status:run.status,result_count:run.results.length});if(run.status==="ok"&&run.results.length){pool=[...pool,...run.results];audit=await runAudit(pool);limitations.push(`One targeted repair used ${repair.provider}; no further repair calls were made.`)}else limitations.push(`One targeted repair with ${repair.provider} did not add results.`)}
     }
+    if((!pool.length||noViableCandidates)&&!repairRuns.length&&this.providers.some(p=>p.enabled()))limitations.push("No eligible alternate-provider repair was available within the call budget.");
     // Keep all retrieval records for the one final Jev pass, even model-rejected
     // records. Eligibility determines what can be returned, not what is scored.
     // Staged gate: triage on snippets first, then extract only the survivors.
@@ -183,7 +186,7 @@ export class SearchHarness {
     // Keep records that failed early triage in the audit; they cannot be promoted by it.
     const extractedByUrl=new Map(extracted.map(x=>[x.url,x]));
     const sourceAudit=await runAudit(pool.map(x=>extractedByUrl.get(x.url)??x));
-    if(sourceAudit.length)audit=sourceAudit;
+    if(sourceAudit.length){const previous=new Map(audit.map(v=>[v.url,v]));audit=sourceAudit.map(v=>previous.get(v.url)?.state==="fail"&&v.state!=="fail"?{...v,state:"fail" as const,reason:`First-pass audit failed: ${previous.get(v.url)!.reason}; post-extraction: ${v.reason}`}:v)}
     const firstJob = plan.jobs[0];
     const lateGate=gateResults(effective,finalMandate,[...extracted, ...rest]);
     const verification=new Map(lateGate.retained.map(x=>[x.result.url,x.verification]));
@@ -191,7 +194,7 @@ export class SearchHarness {
     const veto=new Set(audit.filter(x=>x.state==="fail").map(x=>x.url));
     const uncertain=audit.filter(x=>x.state==="uncertain").length;
     if(uncertain)limitations.push(`${uncertain} source candidates had uncertain Gemini verdicts; they were not treated as verified.`);
-    const rankedAll=[...extracted,...rest,...pool.filter(x=>earlyGate.excluded.some(e=>e.url===x.url))].flatMap(x=>rank(finalMandate,[x],1));
+    const rankedAll=[...new Map([...extracted,...rest,...pool.filter(x=>earlyGate.excluded.some(e=>e.url===x.url))].map(x=>[x.url,x])).values()].flatMap(x=>rank(finalMandate,[x],1));
     const allowed=new Set(lateGate.retained.map(x=>x.result.url).filter(url=>!veto.has(url)));
     const initialRank=rankedAll.map(x=>allowed.has(x.url)?x:{...x,faithfulness:{state:"unverified" as const,score:x.faithfulness.score}});
     meta?.trace?.('9_initial_rank',initialRank);

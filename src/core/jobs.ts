@@ -229,7 +229,7 @@ export type PlannedJob = {
   routing_policy?: string;
 };
 
-export type JobPlan = { version: 1; classification: Classification; budget: Budget; jobs: PlannedJob[]; notes: string[] };
+export type JobPlan = { version: 1; classification: Classification; budget: Budget; max_provider_calls: number; jobs: PlannedJob[]; notes: string[] };
 
 function pickJob(id: string, kind: JobKind, c: Classification, r: SearchRequest, providers: SearchProvider[], health: ProviderHealth, reason: string, preferred?: string): PlannedJob {
   const candidates = scoreCandidates(kind, c, r, providers, health);
@@ -292,7 +292,7 @@ export function planJobs(r: SearchRequest, m: Mandate, providers: SearchProvider
   }
   const capped = jobs.slice(0, budget.max_jobs);
   if (capped.length < jobs.length) notes.push(`Job cap ${budget.max_jobs} applied.`);
-  return { version: 1, classification: c, budget, jobs: capped, notes };
+  return { version: 1, classification: c, budget, max_provider_calls:r.limits.max_provider_calls, jobs: capped, notes };
 }
 
 export const DEEP_RESEARCH_DAILY_CAP = () => { const n = Number(process.env.DEEP_RESEARCH_PER_DAY ?? "20"); return Number.isFinite(n) && n >= 0 ? n : 20; };
@@ -314,12 +314,14 @@ export type GradeFn = (results: ProviderResult[]) => number;
 export async function executePlan(plan: JobPlan, providers: SearchProvider[], call: CallFn, grade: GradeFn, health: ProviderHealth, lowGrade = .25): Promise<ExecutedPlan> {
   const byName = new Map(providers.map(p => [p.name, p]));
   const runs: JobRun[] = [];
+  let callsStarted=0;
   const fallback_used: string[] = [];
   const skipped: string[] = [];
   const escalationIds = new Set(["open_web_backup", "deep_research"]);
   const runOne = async (job: PlannedJob, name: string | undefined, role: JobRun["role"]) => {
     const p = name ? byName.get(name) : undefined;
-    if (!p) return [] as ProviderResult[];
+    if (!p || callsStarted>=plan.max_provider_calls) return [] as ProviderResult[];
+    callsStarted++;
     const r = await call(p, job);
     health.record(p.name, r.status === "ok", r.status);
     runs.push({ job: job.id, provider: p.name, role, latency_ms: r.latency_ms, status: r.status, result_count: r.results.length });
@@ -327,13 +329,13 @@ export async function executePlan(plan: JobPlan, providers: SearchProvider[], ca
   };
   const runJob = async (job: PlannedJob, role: JobRun["role"]) => {
     let res = await runOne(job, job.primary, role);
-    if ((res.length === 0 || grade(res) < lowGrade) && job.fallback && plan.budget.max_providers_per_job > 1) {
+    if ((res.length === 0 || grade(res) < lowGrade) && job.fallback && callsStarted < plan.max_provider_calls && plan.budget.max_providers_per_job > 1) {
       fallback_used.push(`${job.id}:${job.fallback}`);
       res = [...res, ...(await runOne(job, job.fallback, "fallback"))];
       // A provider that errored (bad key, 4xx, timeout) spent no useful budget: try the next
       // live candidate once so an auth failure never leaves the user with zero results.
       const lastRun = runs.filter(r => r.job === job.id).at(-1);
-      if (res.length === 0 && lastRun && lastRun.status !== "ok") {
+      if (res.length === 0 && lastRun && lastRun.status !== "ok" && callsStarted < plan.max_provider_calls) {
         const tried = new Set(runs.filter(r => r.job === job.id).map(r => r.provider));
         const next = job.candidates.find(c => !c.excluded && !tried.has(c.provider) && byName.get(c.provider)?.enabled() && health.quotaLeft(c.provider) && !health.authRejected(c.provider) && health.recentErrors(c.provider) < 1);
         if (next) { fallback_used.push(`${job.id}:${next.provider}`); res = [...res, ...(await runOne(job, next.provider, "fallback"))]; }
@@ -343,17 +345,18 @@ export async function executePlan(plan: JobPlan, providers: SearchProvider[], ca
   };
   const first = plan.jobs.filter(j => !escalationIds.has(j.id));
   const later = plan.jobs.filter(j => escalationIds.has(j.id));
-  let results = (await Promise.all(first.map(j => runJob(j, "primary")))).flat();
+  let results:ProviderResult[]=[];
+  for(const job of first){if(callsStarted>=plan.max_provider_calls){skipped.push(`${job.id}: provider call cap reached`);continue}results.push(...await runJob(job,"primary"))}
   let escalated = false;
   let backupUsed = false, deepUsed = false;
   for (const job of later) {
     const weak = results.length === 0 || grade(results) < lowGrade;
     const allowed = job.id === "deep_research" ? !deepUsed : !backupUsed;
-    if (weak && allowed) {
+    if (weak && allowed && callsStarted<plan.max_provider_calls) {
       escalated = true;
       if (job.id === "deep_research") { deepUsed = true; health.recordDeepResearch(); } else backupUsed = true;
       results = [...results, ...(await runJob(job, "escalation"))];
-    } else skipped.push(`${job.id}: ${weak ? "escalation already used" : "earlier jobs met mandate fit"}`);
+    } else skipped.push(`${job.id}: ${callsStarted>=plan.max_provider_calls ? "provider call cap reached" : weak ? "escalation already used" : "earlier jobs met mandate fit"}`);
   }
   return { results, runs, fallback_used, escalated, skipped };
 }

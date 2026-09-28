@@ -22,6 +22,7 @@ export function validateModelParameters(raw:unknown,r:SearchRequest,intent:Inten
   const p=candidate as ProposedParameter;
   const key=typeof p.key==="string"?canonicalContextKey(p.key):"";
   if(key==="search_object"&&(!p.query_reference||!r.query.toLowerCase().includes(p.query_reference.toLowerCase())))throw new Error("search_object needs an exact query phrase");
+  if(p.query_reference&&(!r.query.toLowerCase().includes(p.query_reference.toLowerCase())||p.class==="psychological"))throw new Error("query_reference requires a functional exact query phrase");
   if(!keyPattern.test(key)||!["functional","psychological"].includes(p.class)||typeof p.why!=="string"||!p.why.trim()||p.why.length>500||!Number.isFinite(p.weight_percent)||p.weight_percent<0||p.weight_percent>100||typeof p.compulsory!=="boolean")throw new Error("invalid parameter shape");
   const id=`${p.class}:${key}`;if(seen.has(id))throw new Error("duplicate parameter");seen.add(id);
   if(p.class==="psychological"&&(p.hard||restricted.test(key)))throw new Error("unsupported psychological hard/sensitive factor");
