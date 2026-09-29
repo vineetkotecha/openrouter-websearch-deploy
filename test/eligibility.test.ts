@@ -44,3 +44,17 @@ it('a date-lunch place is a local venue, not a discovery app',()=>{
  expect(g.excluded.map(z=>z.url)).toContain('https://www.seemor.ai/');
  expect(g.retained.map(z=>z.result.title)).toContain('Olive Bistro Koramangala');
 });
+
+it('rejects an explicit over-budget product title without claiming the live price was verified',()=>{
+ const q=SearchRequestSchema.parse({tenant_id:'t',query:'Best laptop under 80000 INR'});
+ const bad=x('https://shop.example/laptop','Dell Inspiron 16 Rs.110000 Price in India');
+ const verdict=eligibility(q,m,bad);expect(verdict.eligible).toBe(false);expect(verdict.reasons.join(' ')).toMatch(/title advertises price/);expect(verdict.verification.price.status).toBe('unverified');
+ const ambiguous=x('https://shop.example/laptop2','Dell Rs.110000 now Rs.75000');expect(eligibility(q,m,ambiguous).eligible).toBe(true);
+});
+it('requires a provider publication date for an explicitly bounded fresh news query',()=>{
+ const q=SearchRequestSchema.parse({tenant_id:'t',query:'latest space mission launch this week'});
+ const undated=x('https://news.example/story','Mission launch');expect(eligibility(q,m,undated).reasons.join(' ')).toMatch(/publication date missing/);
+ const old={...undated,published_at:new Date(Date.now()-14*864e5).toISOString()};expect(eligibility(q,m,old).eligible).toBe(false);
+ const fresh={...undated,published_at:new Date(Date.now()-864e5).toISOString()};expect(eligibility(q,m,fresh).eligible).toBe(true);
+ const latestOnly=SearchRequestSchema.parse({...q,query:'latest mission launch'});expect(eligibility(latestOnly,m,undated).eligible).toBe(false);
+});

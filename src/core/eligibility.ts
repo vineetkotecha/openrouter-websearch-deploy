@@ -9,6 +9,15 @@ const hotelName=/\b(?:hotel|fabhotel|treebo|oyo|collection o|olive zip|xotel|res
 const productCollectionTitle=/\b(?:best|top|cheap|budget|list of|deals? on|buy|shop)\b.*\b(?:laptops?|phones?|shoes?|chargers?|headphones?|earbuds?|jackets?|toys?)\b|\b(?:laptops?|phones?|shoes?|chargers?|headphones?|earbuds?|jackets?|toys?)\b.*\b(?:under|collection|list|deals?|on sale|compare|202[0-9])\b/i;
 const socialOrEditorial=/\b(?:facebook|instagram|youtube|tiktok|reddit|quora|pinterest)\.com$/i;
 const amount=(v:unknown):number|null=>{if(typeof v==='number')return Number.isFinite(v)?v:null;const s=String(v??'').replace(/,/g,'');const m=s.match(/(?:₹|Rs\.?|INR|\$)\s*(\d+(?:\.\d+)?)/i)??s.match(/^\s*(\d+(?:\.\d+)?)\s*$/);return m?Number(m[1]!):null};
+const titlePrice=(title:string):number|null=>{
+ // A single explicitly labelled title price is a visible contradiction, not
+ // proof of a live checkout price. Multiple amounts are ambiguous.
+ const amounts=[...title.matchAll(/(?:₹|Rs\.?|INR|\$)\s*([\d,]+(?:\.\d+)?)/gi)].map(m=>Number(m[1]!.replace(/,/g,''))).filter(Number.isFinite);
+ return amounts.length===1?amounts[0]!:null;
+};
+// "Latest" uses a conservative seven-day policy; without a dated source we
+// withhold the candidate rather than guess recency.
+const freshWindow=(query:string,now=Date.now()):number|null=>/\b(?:this week|latest)\b/i.test(query)?now-7*864e5:/\b(?:today|last 24 hours)\b/i.test(query)?now-864e5:null;
 const supportedField=(x:ProviderResult,key:RegExp)=>Object.entries(x.fields??{}).find(([k,v])=>key.test(k)&&v.state==='supported'&&v.value!==null);
 function explicitBudget(r:SearchRequest){const structured=Object.entries(r.hard_constraints).find(([k,v])=>/^(?:budget|price|max_price|price_max|price_limit_inr)$/i.test(k)&&amount(v)!==null);if(structured)return amount(structured[1]);const m=r.query.match(/(?:under|below|within|up to|maximum|max)\s*(?:₹|rs\.?\s*)?\s*([\d,]+)(?:\s*[-–]\s*([\d,]+))?/i);return m?Number((m[2]??m[1]!).replace(/,/g,'')):null}
 export function eligibility(r:SearchRequest,m:Mandate,x:ProviderResult,answerUnit?:AnswerUnit):Eligibility{
@@ -37,6 +46,12 @@ export function eligibility(r:SearchRequest,m:Mandate,x:ProviderResult,answerUni
  const priceApplicable=price&&(strategy?.unit==='hotel_property'?/^(?:dated_offer_total_inr|stay_total_inr)$/.test(price[0]):true);
  verification.price={status:priceApplicable?'verified':'unverified',...(priceApplicable?{evidence:`${price[0]}: ${String(price[1].value)}`}:{})};
  if(cap!==null&&priceApplicable&&amount(price[1].value)!==null&&amount(price[1].value)!>cap)reasons.push(`verified price ${String(price[1].value)} exceeds budget ${cap}`);
+ if(cap!==null&&strategy?.unit==='product'&&titlePrice(x.title)!==null&&titlePrice(x.title)!>cap)reasons.push(`title advertises price ${titlePrice(x.title)} above budget ${cap}; current price unverified`);
+ const since=freshWindow(r.query),published=x.published_at?Date.parse(x.published_at):NaN;
+ if(since!==null){
+  verification.publication_date={status:Number.isFinite(published)&&published>=since&&published<=Date.now()+864e5?'verified':'unverified',...(x.published_at?{evidence:`provider published_at: ${x.published_at}`}:{})};
+  if(!Number.isFinite(published)||published<since||published>Date.now()+864e5)reasons.push(x.published_at?`publication date ${x.published_at} outside requested recent window`:'publication date missing for requested recent window');
+ }
  const floor=Number(r.hard_constraints.rating_min??r.query.match(/rated\s+(?:above|over|at least)\s*([0-5](?:\.\d)?)/i)?.[1]);
  const rating=supportedField(x,/^(?:rating|guest_rating)$/);verification.rating={status:rating?'verified':'unverified',...(rating?{evidence:`${rating[0]}: ${String(rating[1].value)}`}:{})};
  if(Number.isFinite(floor)&&floor>0&&rating&&typeof rating[1].value==='number'&&rating[1].value<floor)reasons.push(`verified rating ${rating[1].value} below ${floor}`);
