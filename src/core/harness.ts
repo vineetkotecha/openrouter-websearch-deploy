@@ -1,3 +1,4 @@
+import { nineStageTrace, type TraceEvent } from "./trace.js";
 import { randomUUID } from "node:crypto";
 import { fallbackManifest, type ModelManifest, type AuditVerdict } from "./architecture.js";
 import { curateParameters, curatedRequest } from "./parameter-curation.js";
@@ -35,11 +36,15 @@ export class SearchHarness {
 
   async search(request: SearchRequest, meta?: { principal?: unknown; surface?: string; trace?: (stage:string, data:unknown)=>void }): Promise<SearchResponse | NeedsInput | ContextRequest> {
     const startedAt = Date.now(), episode_id = randomUUID();
+    const traceEvents:TraceEvent[]=[];
+    const record=(stage:string,data:unknown)=>{traceEvents.push({stage,data,elapsed_ms:Date.now()-startedAt});meta?.trace?.(stage,data)};
+    const finish=<T extends SearchResponse|NeedsInput|ContextRequest>(out:T):T=>({...out,trace:nineStageTrace(traceEvents,out.status)});
     const activeRequest={...request,context:request.context.filter(c=>(!c.expires_at||Date.parse(c.expires_at)>Date.now())&&(canonicalContextKey(c.key)!=="location"||!c.observed_at||Date.now()-Date.parse(c.observed_at)<15*60_000))};
-    meta?.trace?.('1_request', {query:request.query, tenant_id:request.tenant_id, context:contextUsed(activeRequest),permissions:request.permissions,limits:request.limits});
+    record('1_request', {query:request.query, tenant_id:request.tenant_id, caller_fill_complete:request.caller_fill_complete,curation_revision_of:request.curation_revision_of, context:contextUsed(activeRequest),permissions:request.permissions,limits:request.limits});
     const intent=await this.writer.form?.(activeRequest)??fallbackIntentFormation(activeRequest);
-    meta?.trace?.('1a_prefill_query_formation',{...formProviderQuery(activeRequest,"pre_fill"),intent});
+    record('1a_prefill_query_formation',{...formProviderQuery(activeRequest,"pre_fill"),intent});
     const baseline = curateParameters(activeRequest, undefined, request.curation_revision_of,intent);
+    record("1_baseline_parameters",baseline);
     // A local search with no search area cannot retrieve anything honestly.
     // Stop after understanding, before spending a second model round on
     // preferences that cannot change this prerequisite.
@@ -49,17 +54,17 @@ export class SearchHarness {
       const requested_context=[{key:'location',why:'A local result needs a search area.',accepted_sources:request.caller_fill_complete?['human' as const]:['caller' as const,'prior_outcome' as const],scope:request.permissions.scopes.length?request.permissions.scopes:['this_search']}];
       if(request.permissions.may_pull_context&&!request.caller_fill_complete){
         const out:ContextRequest={status:'needs_input',kind:'context_request',episode_id,gap:'location',question:'Check whether the caller knows the city or area for this search.',requested_context,how_to_answer:'Return a sourced area if permitted; otherwise call again with caller_fill_complete:true.',curation_id:baseline.id};
-        meta?.trace?.('3_caller_context_request',out);return out;
+        record('3_caller_context_request',out);return finish(out);
       }
       if(request.permissions.may_ask_user&&request.permissions.may_retain&&this.ask){
         const pending=await this.ask({episode_id,request,question,gap:'location',gaps:['location'],principal:meta?.principal}).catch(()=>null);
-        if(pending){meta?.trace?.('5_user_question',{gaps:['location']});return{status:'needs_input',kind:'user_question',episode_id,question,gap:'location',gaps:['location'],resume_token:pending.resume_token,expires_in:86400};}
+        if(pending){record('5_user_question',{gaps:['location'],question});return finish({status:'needs_input',kind:'user_question',episode_id,question,gap:'location',gaps:['location'],resume_token:pending.resume_token,expires_in:86400});}
       }
       const out:ContextRequest={status:'needs_input',kind:'user_question',episode_id,gap:'location',question,requested_context:[{...requested_context[0]!,accepted_sources:['human']}],how_to_answer:'Ask for the area only if permitted. Supply an evidenced answer with caller_fill_complete:true; no provider was called.',curation_id:baseline.id,remaining_user_question:question};
-      meta?.trace?.('5_user_question_or_incomplete',out);return out;
+      record('5_user_question_or_incomplete',out);return finish(out);
     }
     const firstPass = await (this.writer.parameters?.(activeRequest,intent,baseline)??Promise.resolve(fallbackManifest(baseline)));
-    meta?.trace?.('1b_parameter_curation_first_pass', firstPass);
+    record('1b_parameter_curation_first_pass', firstPass);
     // Stage 5 asks the calling agent to inspect only its own permitted context.
     // No mandate is written until the two fill stages are finished.
     const curated=firstPass;
@@ -74,15 +79,15 @@ export class SearchHarness {
     const distinctMissing=[...new Map(missing.map(p=>[`${p.class}:${canonicalContextKey(p.key)}`,p])).values()];
     const necessary=distinctMissing.filter(p=>p.compulsory);
     const optional=distinctMissing.filter(p=>!p.compulsory);
-    meta?.trace?.('2_initial_parameter_curation',{manifest:curated,missing:distinctMissing.map(p=>p.key)});
+    record('2_initial_parameter_curation',{manifest:curated,missing:distinctMissing.map(p=>p.key)});
     if(necessary.length&&request.permissions.may_pull_context&&!request.caller_fill_complete){
       const first=necessary[0]!;const out=contextRequest(episode_id,{key:first.key,question:first.question??`What should I know about ${first.key.replace(/_/g," ")}?`},request);
       out.requested_context=necessary.map(p=>({key:p.key,why:`Check permitted agent context for ${p.key}.`,accepted_sources:["caller" as const,"prior_outcome" as const],scope:request.permissions.scopes.length?request.permissions.scopes:["this_search"]}));
       out.question="Return only permitted agent-known context for the requested parameters.";out.curation_id=curated.id;
       out.how_to_answer="Caller context stage only. Do not ask the user here. Supply evidenced agent-known values, then call again with caller_fill_complete:true to grade any remainder.";
-      meta?.trace?.('3_caller_context_request',out);return out;
+      record('3_caller_context_request',out);return finish(out);
     }
-    meta?.trace?.('4_grade_after_agent_fill',{necessary:necessary.map(p=>p.key),good_to_have:optional.map(p=>p.key)});
+    record('4_grade_after_agent_fill',{necessary:necessary.map(p=>p.key),good_to_have:optional.map(p=>p.key)});
     if(necessary.length){
       const first=necessary[0]!,questions=await (this.writer.questions?.(activeRequest,{...curated,parameters:[...necessary,...curated.parameters.filter(p=>!necessary.includes(p))]})??Promise.resolve(necessary.map(p=>p.question||`What should I know about ${p.key.replace(/_/g," ")}?`)));
       const question=questions.join(" "),gaps=necessary.map(p=>p.key);
@@ -90,20 +95,20 @@ export class SearchHarness {
       // unavailable resume store nor a declined question licenses retrieval.
       if(request.permissions.may_ask_user&&request.permissions.may_retain&&this.ask){
         const pending=await this.ask({episode_id,request,question,gap:first.key,gaps,principal:meta?.principal}).catch(()=>null);
-        if(pending){meta?.trace?.('5_user_question',{gaps});return{status:"needs_input",kind:"user_question",episode_id,question,gap:first.key,gaps,resume_token:pending.resume_token,expires_in:86400};}
+        if(pending){record('5_user_question',{gaps,question});return finish({status:"needs_input",kind:"user_question",episode_id,question,gap:first.key,gaps,resume_token:pending.resume_token,expires_in:86400});}
       }
       const out:ContextRequest={status:"needs_input",kind:"user_question",episode_id,gap:first.key,question,requested_context:necessary.map(p=>({key:p.key,why:"Necessary after caller context was checked.",accepted_sources:["human"],scope:request.permissions.scopes.length?request.permissions.scopes:["this_search"]})),how_to_answer:"The calling agent may ask the user only if its own authority allows it. Return evidenced human answers and caller_fill_complete:true; otherwise report the search incomplete. No providers were called.",curation_id:curated.id,remaining_user_question:question};
-      meta?.trace?.('5_user_question_or_incomplete',out);return out;
+      record('5_user_question_or_incomplete',out);return finish(out);
     }
     const effective=curatedRequest(activeRequest,curated);
     const finalMandate=await this.writer.write(effective,curated);
-    if(curated.generation==="fallback")meta?.trace?.("parameter_generation_fallback",{reason:curated.fallback_reason??"Gemini parameter generation unavailable or invalid; deterministic baseline used"});
+    if(curated.generation==="fallback")record("parameter_generation_fallback",{reason:curated.fallback_reason??"Gemini parameter generation unavailable or invalid; deterministic baseline used"});
     if(intent.strategy==="across_categories")finalMandate.category="general_consumer_search";
     for(const p of curated.parameters.filter(p=>p.class==="psychological"&&p.state==="resolved"&&p.source==="query")){
       if(finalMandate.factors.some(f=>f.key===p.key&&f.class==="psychological"))continue;
       finalMandate.factors.push({key:p.key,class:"psychological",description:`Use the stated ${p.key.replace(/_/g," ")} to rank otherwise eligible results.`,value:p.value,weight:p.priority/100,confidence:1,hard:false,evidence:[{source:"query",reference:p.evidence[0]?.reference}]});
     }
-    meta?.trace?.('6_final_mandate_after_fill',{id:finalMandate.id,curation_id:curated.id});
+    record('6_final_mandate_after_fill',{mandate:finalMandate,curation_id:curated.id});
     const fillDecision={ask:[],defaults:optional.map(p=>({key:p.key,reason:"Good-to-have parameter absent; do not infer it"})),stale:curated.parameters.filter(p=>p.state==="stale").map(p=>p.key)};
     // The final query is model-written after fill. Validate the area before any
     // decomposition; model-generated job queries cannot erase that area either.
@@ -115,7 +120,7 @@ export class SearchHarness {
       try {finalQuery=validatedFinalQuery(await this.writer.finalQuery(effective,intent,curated,formed.provider_query),formed.provider_query,requiredArea,requiredTerms)}
       catch { /* deterministic safe fallback stays visible in the trace */ }
     }
-    meta?.trace?.('5a_postfill_query_formation',{...formed,final_query:finalQuery,model_written:finalQuery!==formed.provider_query});
+    record('5a_postfill_query_formation',{...formed,final_query:finalQuery,model_written:finalQuery!==formed.provider_query});
     const plan = planJobs(effective, finalMandate, this.providers, this.health, undefined, curated);
     const queryRequest={...effective,query:finalQuery};
     try { const proposed=plan.jobs.length?await this.writer.decompose?.(queryRequest,finalMandate,plan.jobs.map(j=>({id:j.id,query:finalQuery})),intent):undefined;if(proposed)for(const job of plan.jobs)if(proposed[job.id])job.query=validatedFinalQuery(proposed[job.id],finalQuery,requiredArea,requiredTerms); } catch {plan.notes.push("Gemini decomposition unavailable; retained final query for capability-based job plan.");}
@@ -134,9 +139,9 @@ export class SearchHarness {
       const decision=decisions[i]!;
       if(decision.selected){job.primary=decision.selected;job.fallback=job.candidates.find(c=>!c.excluded&&c.provider!==decision.selected)?.provider;}
       job.routing_policy=decision.policy;
-      meta?.trace?.('7_subquery_route',{job:job.id,query:job.query,policy:decision.policy,selected:job.primary,eligible:job.candidates.filter(c=>!c.excluded).map(c=>c.provider)});
+      record('7_subquery_route',{job:job.id,query:job.query,policy:decision.policy,selected:job.primary,candidates:job.candidates});
     }
-    meta?.trace?.('5_job_plan',plan);
+    record('5_job_plan',plan);
     const deadline = Math.min(this.c.SEARCH_TIMEOUT_MS, request.limits.latency_ms);
 
     const providerRequest={...effective,query:finalQuery};
@@ -154,9 +159,9 @@ export class SearchHarness {
       } catch (e) { return { status: e instanceof Error ? e.message : "error", latency_ms: Date.now() - s, results: [] as ProviderResult[] }; }
       finally { clearTimeout(t); }
     };
-    const grade = (xs: ProviderResult[]) => { const eligible=gateResults(effective,finalMandate,xs,intent.answer_unit).retained.map(x=>x.result); const top=rank(finalMandate,eligible,3); return top.length?top.reduce((a,x)=>a+x.mandate_fit,0)/top.length:0; };
+    const grade = (xs: ProviderResult[]) => { const gate=gateResults(effective,finalMandate,xs,intent.answer_unit);const top=rank(finalMandate,gate.retained.map(x=>x.result),3);const score=top.length?top.reduce((a,x)=>a+x.mandate_fit,0)/top.length:0;record("6_provider_grade",{input_count:xs.length,eligible_count:gate.retained.length,excluded:gate.excluded,top:top.map(x=>({url:x.url,mandate_fit:x.mandate_fit})),score});return score; };
     const exec = await executePlan(plan, this.providers, call, grade, this.health);
-    meta?.trace?.('6_provider_execution',{runs:exec.runs,result_count:exec.results.length,candidates:exec.results.map(x=>({provider:x.provider,url:x.url,title:x.title})),fallback_used:exec.fallback_used,escalated:exec.escalated,skipped:exec.skipped});
+    record('6_provider_execution',{runs:exec.runs,result_count:exec.results.length,candidates:exec.results.map(x=>({provider:x.provider,url:x.url,title:x.title})),fallback_used:exec.fallback_used,escalated:exec.escalated,skipped:exec.skipped});
 
     // Known-URL shortcut: the URLs themselves are the candidates; no discovery spend.
     const known: ProviderResult[] = plan.classification.known_urls.map(url => ({ provider: "known_url", url, title: url, snippet: "" }));
@@ -167,7 +172,7 @@ export class SearchHarness {
     // any shortlist. Failure is explicit; hard eligibility remains a separate gate.
     let audit:AuditVerdict[]=[];
     const runAudit=async(items:ProviderResult[])=>{if(!this.writer.audit||!items.length)return [] as AuditVerdict[];try{return await this.writer.audit(effective,finalMandate,items,intent)}catch{limitations.push("Gemini correctness audit unavailable; source checks and hard gates remain, but the full model audit was not completed.");return [] as AuditVerdict[]}};
-    audit=await runAudit(pool);
+    audit=await runAudit(pool);record("6_result_audit",{phase:"initial",verdicts:audit});
     // One bounded repair is attempted only when the first retrieval is empty or
     // every candidate visibly fails the model check, and remaining provider budget allows it.
     const firstGate=gateResults(effective,finalMandate,pool,intent.answer_unit);
@@ -175,7 +180,7 @@ export class SearchHarness {
     if((!pool.length||noViableCandidates)&&exec.runs.length<request.limits.max_provider_calls){
       const failedProviders=new Set(exec.runs.map(x=>x.provider));
       const repair=plan.jobs.flatMap(j=>j.candidates.filter(c=>!c.excluded&&!failedProviders.has(c.provider)).map(c=>({job:j,provider:c.provider}))).find(x=>this.providers.some(p=>p.name===x.provider&&p.enabled()));
-      if(repair){const provider=this.providers.find(p=>p.name===repair.provider)!;const run=await call(provider,repair.job);this.health.record(provider.name,run.status==="ok",run.status);repairRuns.push({job:repair.job.id,provider:repair.provider,role:"fallback",latency_ms:run.latency_ms,status:run.status,result_count:run.results.length});if(run.status==="ok"&&run.results.length){pool=[...pool,...run.results];audit=await runAudit(pool);limitations.push(`One targeted repair used ${repair.provider}; no further repair calls were made.`)}else limitations.push(`One targeted repair with ${repair.provider} did not add results.`)}
+      if(repair){const provider=this.providers.find(p=>p.name===repair.provider)!;const run=await call(provider,repair.job);this.health.record(provider.name,run.status==="ok",run.status);repairRuns.push({job:repair.job.id,provider:repair.provider,role:"fallback",latency_ms:run.latency_ms,status:run.status,result_count:run.results.length});if(run.status==="ok"&&run.results.length){pool=[...pool,...run.results];audit=await runAudit(pool);record("6_result_audit",{phase:"after_repair",verdicts:audit});limitations.push(`One targeted repair used ${repair.provider}; no further repair calls were made.`)}else limitations.push(`One targeted repair with ${repair.provider} did not add results.`)}
     }
     if((!pool.length||noViableCandidates)&&!repairRuns.length&&this.providers.some(p=>p.enabled()))limitations.push("No eligible alternate-provider repair was available within the call budget.");
     // Keep all retrieval records for the one final Jev pass, even model-rejected
@@ -188,10 +193,10 @@ export class SearchHarness {
     for (const x of eligiblePool) { if (!byCanon.has(x.url)) byCanon.set(x.url, x); }
     const ordered = triaged.map(t => byCanon.get(t.url)!).filter(Boolean);
     const known_first = [...ordered.filter(x => x.provider === "known_url"), ...ordered.filter(x => x.provider !== "known_url")];
-    meta?.trace?.('7_triage_and_dedupe',{pool_count:pool.length,triaged:triaged.map(x=>({rank:x.rank,url:x.url,title:x.title,mandate_fit:x.mandate_fit,faithfulness:x.faithfulness})),ordered_urls:known_first.map(x=>x.url)});
+    record('7_triage_and_dedupe',{pool_count:pool.length,eligibility:{retained:earlyGate.retained.length,excluded:earlyGate.excluded},audit,triaged:triaged.map(x=>({rank:x.rank,url:x.url,title:x.title,mandate_fit:x.mandate_fit,faithfulness:x.faithfulness})),ordered_urls:known_first.map(x=>x.url)});
     const { results: extracted, report } = await extractSurvivors(known_first, undefined, { max: Math.max(plan.budget.max_extracts, known.length ? Math.min(known.length, 5) : 0), maxChars: plan.budget.max_extract_chars, tokenBudget: plan.budget.token_budget, fetcher: this.opts.fetcher, judge: this.opts.judge , fields: plan.classification.structured_fields});
     const rest = eligiblePool.filter(x => !known_first.includes(x));
-    meta?.trace?.('8_extraction',{report,extracted:extracted.map(x=>({provider:x.provider,url:x.url,title:x.title,fields:x.fields})),untriaged_count:rest.length});
+    record('8_extraction',{report,extracted:extracted.map(x=>({provider:x.provider,url:x.url,title:x.title,fields:x.fields})),untriaged_count:rest.length});
 
     if(branchQueries.length){
       const attempted=exec.runs.filter(run=>run.job.startsWith("category_")).map(run=>branchQueries[Number(run.job.slice(9))-1]?.category).filter(Boolean);
@@ -232,11 +237,11 @@ export class SearchHarness {
     const rankedAll=[...new Map([...extracted,...rest,...pool.filter(x=>earlyGate.excluded.some(e=>e.url===x.url))].map(x=>[x.url,x])).values()].flatMap(x=>rank(finalMandate,[x],1));
     const allowed=new Set(lateGate.retained.map(x=>x.result.url).filter(url=>!veto.has(url)));
     const initialRank=rankedAll.map(x=>allowed.has(x.url)?x:{...x,faithfulness:{state:"unverified" as const,score:x.faithfulness.score}});
-    meta?.trace?.('9_initial_rank',initialRank);
+    record('9_initial_rank',initialRank);
     const eligibleForJev=initialRank.filter(x=>allowed.has(x.url));
     const reranked=await jevRerank(effective,finalMandate,eligibleForJev);
     if(reranked.reason!=="reranked")limitations.push(`Jev rerank not completed: ${reranked.reason}.`);
-    meta?.trace?.('10_jev_rerank',reranked);
+    record('10_jev_rerank',reranked);
     const response: SearchResponse = {
       status: "complete", episode_id,
       results: reranked.results.filter(x=>allowed.has(x.url)).slice(0,5).map(x=>({...x,verification:verification.get(x.url)??{},citations:[{url:x.url,claim:x.title,support:x.faithfulness.state,kind:"source_claim" as const}]})),
@@ -256,11 +261,12 @@ export class SearchHarness {
         known_urls: plan.classification.known_urls, extraction: report, context: contextUsed(effective), curation:curated, eligibility:{excluded:[...earlyGate.excluded,...lateGate.excluded],retained:allowed.size,audit}, formation:{first:firstPass.formed_query,post:finalQuery,revision_of:request.curation_revision_of,used_keys:formed.context_keys}, gaps: finalMandate.gaps.map(g => ({ key: g.key, material: g.material })), fill: plan.classification.structured_fields.length ? fillSummary(plan.classification.structured_fields, extracted.map(x => (x as any).fields)) : undefined, notes: [...plan.notes,...fillDecision.defaults.map(x=>`default:${x.key} - ${x.reason}`),`jev_rerank: ${reranked.successful}/${reranked.attempted}; ${reranked.reason}; ${reranked.latency_ms} ms; tokens ${reranked.usage.input_tokens}/${reranked.usage.output_tokens}`],
       },
     };
-    meta?.trace?.('11_response',response);
+    response.trace=nineStageTrace(traceEvents,response.status);
+    record('11_response',{status:response.status,episode_id:response.episode_id,result_count:response.results.length});
     // Storage must never fail a search: record the failure and still return results.
     let stored=false;
     if (request.permissions.may_retain) await Promise.resolve().then(() => this.store.save({ id: episode_id, tenantId: request.tenant_id, request, response, mandate: finalMandate, principal: meta?.principal, surface: meta?.surface, startedAt, expiresAt: new Date(Date.now() + 30 * 864e5) })).then(()=>{stored=true}).catch(e => { console.error("episode save failed", String((e as Error)?.message ?? e).slice(0, 200)); response.limitations.push("History and usage were not recorded for this search."); });
-    meta?.trace?.('12_decision_learning',{episode_id,storage:stored?'retained':'not_retained',outcome:'not_submitted',may_learn:request.permissions.may_learn,learning_update:stored&&request.permissions.may_learn?'awaiting_explicit_outcome':'not_run',reason:stored&&request.permissions.may_learn?'An outcome event will derive and store a tenant-local learning example.':stored?'Learning not permitted.':'No stored episode for a later outcome; no learning update.'});
+    record('12_decision_learning',{episode_id,storage:stored?'retained':'not_retained',outcome:'not_submitted',may_learn:request.permissions.may_learn,learning_update:stored&&request.permissions.may_learn?'awaiting_explicit_outcome':'not_run',reason:stored&&request.permissions.may_learn?'An outcome event will derive and store a tenant-local learning example.':stored?'Learning not permitted.':'No stored episode for a later outcome; no learning update.'});
     return response;
   }
 }
