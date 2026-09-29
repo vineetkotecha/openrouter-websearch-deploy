@@ -4,6 +4,7 @@
 // and a routing score with hard fails. Every decision is written to the plan trace.
 import type { Mandate, ProviderResult, SearchRequest } from "../contracts/search.js";
 import type { SearchProvider } from "../providers/base.js";
+import type {IntentFormation} from "./intent-formation.js";
 
 export const QUERY_CLASSES = [
   "semantic_discovery", "keyword_web", "news_fresh", "local_shopping_maps", "site_extract",
@@ -92,7 +93,7 @@ function factorValue(r: SearchRequest, m: Mandate, ...keys: string[]): unknown {
 
 // Classify from the mandate (intent, category, functional factors, constraints), not from
 // regex on the raw query alone. The raw query is only a last-resort signal.
-export function classifyMandate(r: SearchRequest, m: Mandate): Classification {
+export function classifyMandate(r: SearchRequest, m: Mandate, intent?:IntentFormation): Classification {
   const text = mandateText(r, m);
   const signals: string[] = [];
   const known_urls = [...new Set([
@@ -112,7 +113,7 @@ export function classifyMandate(r: SearchRequest, m: Mandate): Classification {
   else if (domains.length && has(/\b(changed|crawl|map|all pages|across the site|docs site)/, "site_scope")) q = "site_map_crawl";
   else if (known_urls.length || domains.length) { q = "site_extract"; signals.push("known_domain"); }
   else if (structure_need >= 1) { q = "structured_json"; signals.push("structured_fields"); }
-  else if (/\b(near me|nearby|open now|maps?|directions|restaurant|store hours|date place|date lunch|date dinner|romantic lunch|romantic dinner)\b/i.test(r.query)) { q = "local_shopping_maps"; signals.push("explicit_local_query"); }
+  else if (intent?.answer_unit=== "local_business" || /\b(near me|nearby|open now|maps?|directions|restaurant|store hours|date place|date lunch|date dinner|romantic lunch|romantic dinner)\b/i.test(r.query)) { q = "local_shopping_maps"; signals.push("explicit_local_query"); }
   else if (has(/\b(filings?|10-[kq]|earnings|sec |patents?|clinical trial|journal|peer.review|papers?|academic)/, "premium_corpus")) q = "premium_domain";
   else if (synthesis_requested) { q = "deep_research"; signals.push("synthesis"); }
   else if (has(/\b(company profile|who is|founders? of|headquarter|org chart|entity)/, "entity")) q = "entity_kg";
@@ -242,8 +243,8 @@ function pickJob(id: string, kind: JobKind, c: Classification, r: SearchRequest,
 
 // Decompose a mandate into jobs. Discovery -> evidence is the default; known URLs skip
 // discovery; structured and premium paths run first where the class calls for them.
-export function planJobs(r: SearchRequest, m: Mandate, providers: SearchProvider[], health = new ProviderHealth(), preferredDiscovery?: string, curated?: {parameters:{key:string;state:string;material:boolean;effect:string;hard:boolean}[]}): JobPlan {
-  const c = classifyMandate(r, m);
+export function planJobs(r: SearchRequest, m: Mandate, providers: SearchProvider[], health = new ProviderHealth(), preferredDiscovery?: string, curated?: {parameters:{key:string;state:string;material:boolean;effect:string;hard:boolean}[];intent?:IntentFormation}): JobPlan {
+  const c = classifyMandate(r, m, curated?.intent);
   const budget = budgetFor(r, c);
   const jobs: PlannedJob[] = [];
   const notes: string[] = [];

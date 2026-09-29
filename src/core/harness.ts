@@ -120,7 +120,7 @@ export class SearchHarness {
       } catch (e) { return { status: e instanceof Error ? e.message : "error", latency_ms: Date.now() - s, results: [] as ProviderResult[] }; }
       finally { clearTimeout(t); }
     };
-    const grade = (xs: ProviderResult[]) => { const eligible=gateResults(effective,finalMandate,xs).retained.map(x=>x.result); const top=rank(finalMandate,eligible,3); return top.length?top.reduce((a,x)=>a+x.mandate_fit,0)/top.length:0; };
+    const grade = (xs: ProviderResult[]) => { const eligible=gateResults(effective,finalMandate,xs,intent.answer_unit).retained.map(x=>x.result); const top=rank(finalMandate,eligible,3); return top.length?top.reduce((a,x)=>a+x.mandate_fit,0)/top.length:0; };
     const exec = await executePlan(plan, this.providers, call, grade, this.health);
     meta?.trace?.('6_provider_execution',{runs:exec.runs,result_count:exec.results.length,candidates:exec.results.map(x=>({provider:x.provider,url:x.url,title:x.title})),fallback_used:exec.fallback_used,escalated:exec.escalated,skipped:exec.skipped});
 
@@ -136,7 +136,7 @@ export class SearchHarness {
     audit=await runAudit(pool);
     // One bounded repair is attempted only when the first retrieval is empty or
     // every candidate visibly fails the model check, and remaining provider budget allows it.
-    const firstGate=gateResults(effective,finalMandate,pool);
+    const firstGate=gateResults(effective,finalMandate,pool,intent.answer_unit);
     const noViableCandidates=pool.length>0&&firstGate.retained.every(x=>audit.some(v=>v.url===x.result.url&&v.state==="fail"));
     if((!pool.length||noViableCandidates)&&exec.runs.length<request.limits.max_provider_calls){
       const failedProviders=new Set(exec.runs.map(x=>x.provider));
@@ -147,7 +147,7 @@ export class SearchHarness {
     // Keep all retrieval records for the one final Jev pass, even model-rejected
     // records. Eligibility determines what can be returned, not what is scored.
     // Staged gate: triage on snippets first, then extract only the survivors.
-    const earlyGate=gateResults(effective,finalMandate,pool);
+    const earlyGate=gateResults(effective,finalMandate,pool,intent.answer_unit);
     const eligiblePool=earlyGate.retained.map(x=>x.result);
     const triaged = rank(finalMandate, eligiblePool, Math.max(request.limits.max_results * 2, 10));
     const byCanon = new Map<string, ProviderResult>();
@@ -189,7 +189,7 @@ export class SearchHarness {
     const sourceAudit=extractedByUrl.size?await runAudit(auditInputs):[];
     if(sourceAudit.length){const previous=new Map(audit.map(v=>[v.url,v]));audit=sourceAudit.map(v=>previous.get(v.url)?.state==="fail"&&v.state!=="fail"&&!(previous.get(v.url)!.reason.startsWith("Temporal contradiction was not established"))?{...v,state:"fail" as const,reason:`First-pass audit failed: ${previous.get(v.url)!.reason}; post-extraction: ${v.reason}`}:v)}
     const firstJob = plan.jobs[0];
-    const lateGate=gateResults(effective,finalMandate,[...extracted, ...rest]);
+    const lateGate=gateResults(effective,finalMandate,[...extracted, ...rest],intent.answer_unit);
     const verification=new Map(lateGate.retained.map(x=>[x.result.url,x.verification]));
     // The audit sees the complete retrieved pool, not a preselected top-eight shortlist.
     const veto=new Set(audit.filter(x=>x.state==="fail").map(x=>x.url));

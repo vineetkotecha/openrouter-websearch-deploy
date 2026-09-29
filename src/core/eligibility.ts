@@ -1,5 +1,5 @@
 import type {Mandate,ProviderResult,SearchRequest} from '../contracts/search.js';
-import {answerStrategy} from './answer-units.js';
+import {answerStrategy,type AnswerUnit} from './answer-units.js';
 
 export type Verification={status:'verified'|'unverified';evidence?:string};
 export type Eligibility={eligible:boolean;reasons:string[];verification:Record<string,Verification>};
@@ -11,8 +11,8 @@ const socialOrEditorial=/\b(?:facebook|instagram|youtube|tiktok|reddit|quora|pin
 const amount=(v:unknown):number|null=>{if(typeof v==='number')return Number.isFinite(v)?v:null;const s=String(v??'').replace(/,/g,'');const m=s.match(/(?:₹|Rs\.?|INR|\$)\s*(\d+(?:\.\d+)?)/i)??s.match(/^\s*(\d+(?:\.\d+)?)\s*$/);return m?Number(m[1]!):null};
 const supportedField=(x:ProviderResult,key:RegExp)=>Object.entries(x.fields??{}).find(([k,v])=>key.test(k)&&v.state==='supported'&&v.value!==null);
 function explicitBudget(r:SearchRequest){const structured=Object.entries(r.hard_constraints).find(([k,v])=>/^(?:budget|price|max_price|price_max|price_limit_inr)$/i.test(k)&&amount(v)!==null);if(structured)return amount(structured[1]);const m=r.query.match(/(?:under|below|within|up to|maximum|max)\s*(?:₹|rs\.?\s*)?\s*([\d,]+)(?:\s*[-–]\s*([\d,]+))?/i);return m?Number((m[2]??m[1]!).replace(/,/g,'')):null}
-export function eligibility(r:SearchRequest,m:Mandate,x:ProviderResult):Eligibility{
- const reasons:string[]=[],verification:Record<string,Verification>={},strategy=answerStrategy(r);
+export function eligibility(r:SearchRequest,m:Mandate,x:ProviderResult,answerUnit?:AnswerUnit):Eligibility{
+ const reasons:string[]=[],verification:Record<string,Verification>={},strategy=answerUnit?{unit:answerUnit,requiresNamedEntity:answerUnit!=="flight_itinerary"&&answerUnit!=="research_source"}:answerStrategy(r);
  let url:URL;try{url=new URL(x.url)}catch{return{eligible:false,reasons:['invalid URL'],verification}};
  if(strategy?.requiresNamedEntity){
   const title=x.title.replace(/\s*[-|:].*$/,'').trim();
@@ -49,4 +49,4 @@ export function eligibility(r:SearchRequest,m:Mandate,x:ProviderResult):Eligibil
  if(strategy?.unit==='hotel_property')for(const key of ['stay_date','availability','discount','cleanliness','construction_date','star_class'])verification[key]={status:'unverified'};
  return{eligible:!reasons.length,reasons,verification};
 }
-export function gateResults(r:SearchRequest,m:Mandate,xs:ProviderResult[]){const excluded:{url:string;reasons:string[]}[]=[],retained:{result:ProviderResult;verification:Record<string,Verification>}[]=[];for(const x of xs){const g=eligibility(r,m,x);if(g.eligible)retained.push({result:x,verification:g.verification});else excluded.push({url:x.url,reasons:g.reasons})}return{retained,excluded}}
+export function gateResults(r:SearchRequest,m:Mandate,xs:ProviderResult[],answerUnit?:AnswerUnit){const excluded:{url:string;reasons:string[]}[]=[],retained:{result:ProviderResult;verification:Record<string,Verification>}[]=[];for(const x of xs){const g=eligibility(r,m,x,answerUnit);if(g.eligible)retained.push({result:x,verification:g.verification});else excluded.push({url:x.url,reasons:g.reasons})}return{retained,excluded}}

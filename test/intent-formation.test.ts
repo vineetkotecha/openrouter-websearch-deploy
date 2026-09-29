@@ -1,5 +1,7 @@
 import {describe,it,expect,vi} from 'vitest';
 import {normalizeIntentFormation} from '../src/core/intent-formation.js';
+import {classifyMandate} from '../src/core/jobs.js';
+import {validateModelParameters} from '../src/core/architecture.js';
 import {curateParameters} from '../src/core/parameter-curation.js';
 import {SearchRequestSchema} from '../src/contracts/search.js';
 import {SearchHarness,MemoryStore} from '../src/core/harness.js';
@@ -8,14 +10,10 @@ const req=(x:any)=>SearchRequestSchema.parse({tenant_id:'t',query:'find a date p
 const formation=(r:any)=>normalizeIntentFormation({decision:'Pick somewhere to spend time together',intent_space:[{category:'restaurant',why:'One option'},{category:'outdoor walk',why:'A different option'},{category:'activity',why:'Another option'}],unknowns:[{key:'time',question:'When?',why:'It may affect availability',result_changing:true}],candidate_human_factors:[{key:'desire_to_impress',question:'Do you want it to feel impressive?',why:'Could change preferred results',value:'high'}]},r);
 const mk=()=>{const calls:string[]=[];const provider={name:'exa',enabled:()=>true,search:async({request}:any)=>{calls.push(request.query);return[{provider:'exa',url:`https://places.example/${calls.length}`,title:request.query,snippet:request.query}]}};const writer=new HeuristicMandateWriter();const h=new SearchHarness({SEARCH_TIMEOUT_MS:1000} as any,{write:(r:any)=>writer.write(r),form:async(r:any)=>formation(r)},[provider as any],new MemoryStore(),{fetcher:async()=>({ok:false,text:async()=>''}) as any});return{h,calls}};
 describe('general first-pass intent formation',()=>{
- it('does not assume a food category and explores separate search branches',async()=>{
+ it('asks what answer type before branching into unlike answers',async()=>{
   const {h,calls}=mk();const out:any=await h.search(req({limits:{max_jobs:3,max_provider_calls:3,max_results:5}}));
-  expect(out.status).toBe('complete');expect(calls.length).toBeGreaterThanOrEqual(2);
-  expect(calls.join(' ')).toContain('outdoor walk');expect(calls.join(' ')).toContain('restaurant');
-  expect(out.plan.curation.intent.category_state).toBe('ambiguous');
-  expect(out.plan.curation.parameters.find((p:any)=>p.key==='intent_category')).toMatchObject({state:'missing',compulsory:false});
-  expect(out.plan.curation.parameters.find((p:any)=>p.key==='desire_to_impress')).toMatchObject({class:'psychological',state:'missing',compulsory:false});
-  expect(out.plan.curation.parameters.find((p:any)=>p.key==='time')).toMatchObject({state:'missing',compulsory:false});
+  expect(out.status).toBe('needs_input');expect(out.kind).toBe('user_question');expect(calls).toEqual([]);
+  expect(out.requested_context.some((x:any)=>x.key==='intent_category')).toBe(true);
  });
  it('keeps a human hypothesis valueless, and uses directly evidenced human context only for ranking',async()=>{
   const r=req({context:[{key:'desire_to_impress',class:'psychological',value:'high',source:'human',confidence:.9,evidence:[{source:'human',reference:'msg-42'}],allowed_uses:['rerank']}],agent_understanding:{source:'user_agent',psychological_parameters:[]}});
@@ -34,4 +32,29 @@ describe('general first-pass intent formation',()=>{
 it('respects an explicit category without inventing alternatives',()=>{
  const r=req({category_hint:'museum'});
  expect(normalizeIntentFormation({intent_space:[{category:'restaurant',why:'possible'},{category:'museum',why:'caller'}]},r)).toMatchObject({category_state:'explicit',strategy:'focused',search_branches:[]});
+});
+
+describe('query-understanding contract',()=>{
+ const req=(query:string)=>SearchRequestSchema.parse({tenant_id:'t',query});
+ it('accepts a model venue interpretation beyond literal restaurant words and makes location compulsory',()=>{
+  const r=req('A quiet spot for our anniversary meal tonight');
+  const f=normalizeIntentFormation({answer_unit:'local_business',required_context:[{key:'city',question:'Where should I look?',why:'Local search needs an area'}]},r);
+  expect(f.answer_unit).toBe('local_business');
+  expect(f.category_state).toBe('explicit');
+  const p=curateParameters(r,undefined,undefined,f);
+  expect(p.parameters.find(x=>x.key==='location')).toMatchObject({state:'missing',compulsory:true,question:'Where should I look?'});
+  expect(classifyMandate(r, {intent:r.query,category:'general_consumer_search',factors:[]} as any,f).query_class).toBe('local_shopping_maps');
+ });
+ it('does not erase model-query conflict; asks for answer type before retrieval',()=>{
+  const r=req('Find a date place for lunch');
+  const f=normalizeIntentFormation({answer_unit:'product',intent_space:[{category:'product',why:'model'}]},r);
+  expect(f).toMatchObject({answer_unit:undefined,category_state:'ambiguous'});
+  expect(curateParameters(r,undefined,undefined,f).parameters.find(x=>x.key==='intent_category')).toMatchObject({compulsory:true,state:'missing'});
+ });
+ it('does not let a model omit a first-stage required key from parameter proposals',()=>{
+  const r=req('A quiet spot for our anniversary meal tonight');
+  const f=normalizeIntentFormation({answer_unit:'local_business',required_context:[{key:'city',question:'Which city?',why:'Needed for local results'}]},r);
+  const b=curateParameters(r,undefined,undefined,f);
+  expect(()=>validateModelParameters({parameters:[{key:'search_object',class:'functional',why:'target',weight_percent:100,compulsory:true,query_reference:'spot'}]},r,f,b)).toThrow('omitted required context location');
+ });
 });

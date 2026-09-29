@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Mandate, SearchRequest } from "../contracts/search.js";
 import { canonicalContextKey, canonicalGaps, heuristicGaps } from "./context-pull.js";
-import type { IntentFormation } from "./intent-formation.js";
+import {validatedIntentRequirements,type IntentFormation} from "./intent-formation.js";
 
 export type CuratedParameter = {
   key: string; class: "functional" | "psychological"; value?: unknown;
@@ -67,7 +67,13 @@ export function curateParameters(r: SearchRequest, m?: Mandate, revision_of?: st
     else if(!supplied)put({key,class:"psychological",state:"missing",evidence:[],confidence:0,allowed_uses:["rerank","ask"],hard:false,material:true,priority:80,effect:"ranking",question});
   }
   if(intent?.category_state==="ambiguous"&&!r.category_hint){
-    put({key:"intent_category",class:"functional",state:"missing",evidence:[],confidence:0,allowed_uses:["search","ask"],hard:false,material:false,priority:40,effect:"retrieval",question:`Which kind of result would you like? ${intent.intent_space.map(x=>x.category).join(", ")}?`});
+    put({key:"intent_category",class:"functional",state:"missing",evidence:[],confidence:0,allowed_uses:["search","ask"],hard:false,material:true,priority:80,effect:"retrieval",question:`Which kind of result would you like? ${intent.intent_space.map(x=>x.category).join(", ")}?`});
+  }
+  for(const g of intent?validatedIntentRequirements(r,intent):[]){
+    const key=canonicalContextKey(g.key), old=slots.get(`functional:${key}`);
+    if(old?.state==='resolved')continue;
+    if(old){old.material=true;old.criticality=80;old.compulsory=true;old.question=g.question;continue;}
+    put({key,class:'functional',state:'missing',evidence:[],confidence:0,allowed_uses:['search','ask'],hard:false,material:true,priority:80,effect:'retrieval',question:g.question});
   }
   for(const g of intent?.unknowns??[]){
     if(slots.has(`functional:${g.key}`)||g.key==="intent_category")continue;
