@@ -137,7 +137,7 @@ export class SearchHarness {
     // Gemini checks the *entire retrieved pool* against the original query before
     // any shortlist. Failure is explicit; hard eligibility remains a separate gate.
     let audit:AuditVerdict[]=[];
-    const runAudit=async(items:ProviderResult[])=>{if(!this.writer.audit||!items.length)return [] as AuditVerdict[];try{return await this.writer.audit(effective,finalMandate,items)}catch{limitations.push("Gemini correctness audit unavailable; source checks and hard gates remain, but the full model audit was not completed.");return [] as AuditVerdict[]}};
+    const runAudit=async(items:ProviderResult[])=>{if(!this.writer.audit||!items.length)return [] as AuditVerdict[];try{return await this.writer.audit(effective,finalMandate,items,intent)}catch{limitations.push("Gemini correctness audit unavailable; source checks and hard gates remain, but the full model audit was not completed.");return [] as AuditVerdict[]}};
     audit=await runAudit(pool);
     // One bounded repair is attempted only when the first retrieval is empty or
     // every candidate visibly fails the model check, and remaining provider budget allows it.

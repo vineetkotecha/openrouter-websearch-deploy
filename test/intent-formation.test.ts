@@ -1,7 +1,7 @@
 import {describe,it,expect,vi} from 'vitest';
 import {normalizeIntentFormation} from '../src/core/intent-formation.js';
 import {classifyMandate} from '../src/core/jobs.js';
-import {validateModelParameters} from '../src/core/architecture.js';
+import {validateModelParameters,auditPrompt} from '../src/core/architecture.js';
 import {curateParameters} from '../src/core/parameter-curation.js';
 import {SearchRequestSchema} from '../src/contracts/search.js';
 import {SearchHarness,MemoryStore} from '../src/core/harness.js';
@@ -71,4 +71,12 @@ it('orders first-stage context ahead of model extras and deduplicates canonical 
  expect(out.requested_context[0].key).toBe('location');
  expect(out.requested_context.filter((x:any)=>x.key==='location')).toHaveLength(1);
  expect(out.requested_context.some((x:any)=>x.key==='availability_check')).toBe(false);
+});
+
+it('gives the audit the same first-stage answer unit used by routing',()=>{
+ const r=SearchRequestSchema.parse({tenant_id:'t',query:'A quiet spot for our anniversary meal tonight'});
+ const f=normalizeIntentFormation({answer_unit:'local_business'},r);
+ const prompt=auditPrompt(r,{intent:r.query} as any,[],new Date('2026-09-29T10:00:00Z'),f);
+ expect(prompt).toContain('"answer_unit":"local_business"');
+ expect(prompt).toContain('app page about finding the answer is not the answer unit');
 });
