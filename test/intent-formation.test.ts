@@ -80,3 +80,13 @@ it('gives the audit the same first-stage answer unit used by routing',()=>{
  expect(prompt).toContain('"answer_unit":"local_business"');
  expect(prompt).toContain('app page about finding the answer is not the answer unit');
 });
+
+it('puts location ahead of other first-stage preferences for a local search',async()=>{
+ const r=SearchRequestSchema.parse({tenant_id:'t',query:'A quiet spot for our anniversary meal tonight',permissions:{may_pull_context:true}});
+ const f=normalizeIntentFormation({answer_unit:'local_business',required_context:[{key:'cuisine_preference',question:'What food?',why:'Taste'},{key:'city',question:'Where?',why:'Area'}]},r);
+ const b=curateParameters(r,undefined,undefined,f);
+ const w=new HeuristicMandateWriter();
+ const h=new SearchHarness({SEARCH_TIMEOUT_MS:1000} as any,{write:(x:any)=>w.write(x),form:async()=>f,parameters:async()=>({...b,generation:'gemini' as const,weight_total_percent:100,parameters:b.parameters.map(x=>({...x,priority:x.key==='cuisine_preference'?80:20}))})},[],new MemoryStore());
+ const out:any=await h.search(r);
+ expect(out.gap).toBe('location');expect(out.requested_context.map((x:any)=>x.key).slice(0,2)).toEqual(['location','cuisine_preference']);
+});

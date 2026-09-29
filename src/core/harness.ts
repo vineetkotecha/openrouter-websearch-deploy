@@ -45,11 +45,14 @@ export class SearchHarness {
     // Stage 5 asks the calling agent to inspect only its own permitted context.
     // No mandate is written until the two fill stages are finished.
     const curated=firstPass;
-    const understoodKeys=new Set(validatedIntentRequirements(activeRequest,intent).map(x=>canonicalContextKey(x.key)));
+    const understoodOrder=validatedIntentRequirements(activeRequest,intent).map(x=>canonicalContextKey(x.key));
     const missing=curated.parameters.filter(p=>p.state!=="resolved"&&p.allowed_uses.includes("ask"));
     // First-stage requirements outrank model-produced extras, regardless of the
     // second-stage percentage weights. Never ask duplicate canonical keys.
-    missing.sort((a,b)=>Number(understoodKeys.has(canonicalContextKey(b.key)))-Number(understoodKeys.has(canonicalContextKey(a.key))));
+    missing.sort((a,b)=>{
+      const ai=understoodOrder.indexOf(canonicalContextKey(a.key)),bi=understoodOrder.indexOf(canonicalContextKey(b.key));
+      return (ai<0?Number.MAX_SAFE_INTEGER:ai)-(bi<0?Number.MAX_SAFE_INTEGER:bi);
+    });
     const distinctMissing=[...new Map(missing.map(p=>[`${p.class}:${canonicalContextKey(p.key)}`,p])).values()];
     const necessary=distinctMissing.filter(p=>p.compulsory);
     const optional=distinctMissing.filter(p=>!p.compulsory);

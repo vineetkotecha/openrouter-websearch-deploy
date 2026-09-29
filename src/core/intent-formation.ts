@@ -53,5 +53,9 @@ export function validatedIntentRequirements(r:SearchRequest,intent:IntentFormati
   fields.unshift({key:'location',question:'Which city or area should I search?',why:'A local place cannot be selected without a search area.'});
  const unique=new Map<string,typeof fields[number]>();
  for(const f of fields){const key=canonicalContextKey(f.key);if(!unique.has(key))unique.set(key,{...f,key});}
- return [...unique.values()];
+ const ordered=[...unique.values()];
+ // Location is a prerequisite for local retrieval; do not let arbitrary
+ // model weight/order bury it under lifestyle or cuisine preferences.
+ if(intent.answer_unit==='local_business')ordered.sort((a,b)=>Number(b.key==='location')-Number(a.key==='location'));
+ return ordered;
 }
