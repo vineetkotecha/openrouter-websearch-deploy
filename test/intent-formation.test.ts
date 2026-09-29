@@ -88,5 +88,17 @@ it('puts location ahead of other first-stage preferences for a local search',asy
  const w=new HeuristicMandateWriter();
  const h=new SearchHarness({SEARCH_TIMEOUT_MS:1000} as any,{write:(x:any)=>w.write(x),form:async()=>f,parameters:async()=>({...b,generation:'gemini' as const,weight_total_percent:100,parameters:b.parameters.map(x=>({...x,priority:x.key==='cuisine_preference'?80:20}))})},[],new MemoryStore());
  const out:any=await h.search(r);
- expect(out.gap).toBe('location');expect(out.requested_context.map((x:any)=>x.key).slice(0,2)).toEqual(['location','cuisine_preference']);
+ expect(out.gap).toBe('location');expect(out.requested_context.map((x:any)=>x.key)).toEqual(['location']);
+});
+
+it('stops a local search after query understanding without a second model call',async()=>{
+ const r=SearchRequestSchema.parse({tenant_id:'t',query:'A quiet spot for our anniversary meal tonight',permissions:{may_pull_context:true}});
+ const f=normalizeIntentFormation({answer_unit:'local_business',required_context:[{key:'cuisine_preference',question:'Which cuisine?',why:'Preference'},{key:'city',question:'Where should I look?',why:'Area'}]},r);
+ let parameterCalls=0,providerCalls=0;
+ const h=new SearchHarness({SEARCH_TIMEOUT_MS:1000} as any,{write:async()=>{throw Error('mandate should not run')},form:async()=>f,parameters:async()=>{parameterCalls++;throw Error('parameters should not run')}},[{name:'exa',enabled:()=>true,search:async()=>{providerCalls++;return []}}] as any,new MemoryStore());
+ const first:any=await h.search(r);
+ expect(first).toMatchObject({kind:'context_request',gap:'location'});expect(first.requested_context.map((x:any)=>x.key)).toEqual(['location']);
+ const second:any=await h.search(SearchRequestSchema.parse({...r,caller_fill_complete:true}));
+ expect(second).toMatchObject({kind:'user_question',gap:'location'});
+ expect(parameterCalls).toBe(0);expect(providerCalls).toBe(0);
 });

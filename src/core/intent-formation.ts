@@ -49,13 +49,16 @@ export function intentFormationPrompt(r:SearchRequest){return `Map the intent sp
 
 export function validatedIntentRequirements(r:SearchRequest,intent:IntentFormation){
  const fields=intent.required_context.filter(f=>!/(?:^|_)(?:availability_check|rating_check|review_check|source_verification|hours_check)(?:$|_)/.test(f.key));
- if(intent.answer_unit==='local_business' && !fields.some(x=>/^(?:location|city|area|geographic_location|neighbou?rhood|search_location)$/i.test(x.key)))
-  fields.unshift({key:'location',question:'Which city or area should I search?',why:'A local place cannot be selected without a search area.'});
+ // A venue can be discovered without a declared cuisine, budget or atmosphere;
+ // those refine ranking, not whether retrieval may begin. Hold only the search
+ // area at this stage, rather than letting model phrasing turn preferences into
+ // fresh, unstable prerequisites on each pass.
+ if(intent.answer_unit==='local_business'){
+  const location=fields.find(f=>canonicalContextKey(f.key)==='location');
+  return [{key:'location',question:location?.question??'Which city or area should I search?',why:location?.why??'A local place cannot be selected without a search area.'}];
+ }
  const unique=new Map<string,typeof fields[number]>();
  for(const f of fields){const key=canonicalContextKey(f.key);if(!unique.has(key))unique.set(key,{...f,key});}
  const ordered=[...unique.values()];
- // Location is a prerequisite for local retrieval; do not let arbitrary
- // model weight/order bury it under lifestyle or cuisine preferences.
- if(intent.answer_unit==='local_business')ordered.sort((a,b)=>Number(b.key==='location')-Number(a.key==='location'));
  return ordered;
 }

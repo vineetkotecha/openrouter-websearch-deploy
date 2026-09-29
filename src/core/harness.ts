@@ -40,6 +40,24 @@ export class SearchHarness {
     const intent=await this.writer.form?.(activeRequest)??fallbackIntentFormation(activeRequest);
     meta?.trace?.('1a_prefill_query_formation',{...formProviderQuery(activeRequest,"pre_fill"),intent});
     const baseline = curateParameters(activeRequest, undefined, request.curation_revision_of,intent);
+    // A local search with no search area cannot retrieve anything honestly.
+    // Stop after understanding, before spending a second model round on
+    // preferences that cannot change this prerequisite.
+    const area=baseline.parameters.find(p=>p.class==='functional'&&p.key==='location');
+    if(intent.answer_unit==='local_business'&&area?.state!=='resolved'){
+      const question=area?.question??'Which city or area should I search?';
+      const requested_context=[{key:'location',why:'A local result needs a search area.',accepted_sources:request.caller_fill_complete?['human' as const]:['caller' as const,'prior_outcome' as const],scope:request.permissions.scopes.length?request.permissions.scopes:['this_search']}];
+      if(request.permissions.may_pull_context&&!request.caller_fill_complete){
+        const out:ContextRequest={status:'needs_input',kind:'context_request',episode_id,gap:'location',question:'Check whether the caller knows the city or area for this search.',requested_context,how_to_answer:'Return a sourced area if permitted; otherwise call again with caller_fill_complete:true.',curation_id:baseline.id};
+        meta?.trace?.('3_caller_context_request',out);return out;
+      }
+      if(request.permissions.may_ask_user&&request.permissions.may_retain&&this.ask){
+        const pending=await this.ask({episode_id,request,question,gap:'location',gaps:['location'],principal:meta?.principal}).catch(()=>null);
+        if(pending){meta?.trace?.('5_user_question',{gaps:['location']});return{status:'needs_input',kind:'user_question',episode_id,question,gap:'location',gaps:['location'],resume_token:pending.resume_token,expires_in:86400};}
+      }
+      const out:ContextRequest={status:'needs_input',kind:'user_question',episode_id,gap:'location',question,requested_context:[{...requested_context[0]!,accepted_sources:['human']}],how_to_answer:'Ask for the area only if permitted. Supply an evidenced answer with caller_fill_complete:true; no provider was called.',curation_id:baseline.id,remaining_user_question:question};
+      meta?.trace?.('5_user_question_or_incomplete',out);return out;
+    }
     const firstPass = await (this.writer.parameters?.(activeRequest,intent,baseline)??Promise.resolve(fallbackManifest(baseline)));
     meta?.trace?.('1b_parameter_curation_first_pass', firstPass);
     // Stage 5 asks the calling agent to inspect only its own permitted context.
@@ -57,9 +75,9 @@ export class SearchHarness {
     const necessary=distinctMissing.filter(p=>p.compulsory);
     const optional=distinctMissing.filter(p=>!p.compulsory);
     meta?.trace?.('2_initial_parameter_curation',{manifest:curated,missing:distinctMissing.map(p=>p.key)});
-    if(distinctMissing.length&&request.permissions.may_pull_context&&!request.caller_fill_complete){
-      const first=distinctMissing[0]!;const out=contextRequest(episode_id,{key:first.key,question:first.question??`What should I know about ${first.key.replace(/_/g," ")}?`},request);
-      out.requested_context=distinctMissing.map(p=>({key:p.key,why:`Check permitted agent context for ${p.key}.`,accepted_sources:["caller" as const,"prior_outcome" as const],scope:request.permissions.scopes.length?request.permissions.scopes:["this_search"]}));
+    if(necessary.length&&request.permissions.may_pull_context&&!request.caller_fill_complete){
+      const first=necessary[0]!;const out=contextRequest(episode_id,{key:first.key,question:first.question??`What should I know about ${first.key.replace(/_/g," ")}?`},request);
+      out.requested_context=necessary.map(p=>({key:p.key,why:`Check permitted agent context for ${p.key}.`,accepted_sources:["caller" as const,"prior_outcome" as const],scope:request.permissions.scopes.length?request.permissions.scopes:["this_search"]}));
       out.question="Return only permitted agent-known context for the requested parameters.";out.curation_id=curated.id;
       out.how_to_answer="Caller context stage only. Do not ask the user here. Supply evidenced agent-known values, then call again with caller_fill_complete:true to grade any remainder.";
       meta?.trace?.('3_caller_context_request',out);return out;
