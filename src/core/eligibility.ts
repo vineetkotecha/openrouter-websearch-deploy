@@ -20,6 +20,12 @@ export function eligibility(r:SearchRequest,m:Mandate,x:ProviderResult):Eligibil
   if(strategy.unit==='hotel_property'){
    if(listingPath.test(url.pathname)||collectionTitle.test(title)&&!/^\s*(?:fabhotel|treebo|oyo|collection o|olive zip|xotel)\b/i.test(title))reasons.push('collection page, not an individual hotel');
    if(!hotelName.test(title)||/^(?:this|the|a|our)\s+hotel\b|\bthis hotel\b/i.test(title)||/^[+\d\s()\-]{8,}/.test(title))reasons.push('no named hotel property in result title');
+  }else if(strategy.unit==='local_business'){
+   // Search/discovery apps are not the restaurant, cafe or venue the person can visit.
+   if(/\b(?:find|discover|search|choose|pick|recommend|curat\w*|match|decide)\b/i.test(x.snippet.slice(0,700)) &&
+      /\b(?:restaurants?|places?|spots?|date)\b/i.test(x.snippet.slice(0,700)) &&
+      /\b(?:app|platform|tool|service|AI-powered|sign up|start with|how it works)\b/i.test(x.snippet.slice(0,700)))
+     reasons.push('discovery service, not an individual place to visit');
   }else if(strategy.unit==='product'){
    if(listingPath.test(url.pathname)||productCollectionTitle.test(title))reasons.push('collection page, not an individual product');
   }else if(listingPath.test(url.pathname)||collectionTitle.test(title))reasons.push('collection page, not an individual answer');

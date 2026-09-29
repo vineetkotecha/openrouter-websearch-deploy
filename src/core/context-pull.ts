@@ -30,6 +30,8 @@ export function heuristicGaps(r: SearchRequest): Mandate["gaps"] {
     gaps.push({ key: "origin", material: true, question: "Where would you leave from?" });
   if (/\b(luxury )?watch for my anniversary\b/i.test(r.query) && !has(/^(recipient|wrist_size|style)/i))
     gaps.push({ key: "recipient", material: true, question: "Who is the watch for?" });
+  if (/(?:\b(?:date|romantic)\s+(?:lunch|dinner)\b|\b(?:date|romantic)\s+(?:place|spot|venue)\b[^.?!]{0,75}\b(?:lunch|dinner)\b)/i.test(r.query) && !has(/^(location|city|area|lat|lng|lon|postcode|zip|address)/i) && !/\b(?:in|near|around)\s+(?!me\b|my\b|the\b)[A-Z][\p{L}\s,-]{2,60}/u.test(r.query))
+    gaps.push({ key: "location", material: true, question: "Which city or area should I look in for the date lunch?" });
   if (LOCAL.test(r.query) && !has(/^(location|city|area|lat|lng|lon|postcode|zip|address)/i) && !/\b(?:in|near|around)\s+(?!me\b|my\b|the\b)[A-Z][\p{L}\s,-]{2,60}/u.test(r.query))
     gaps.push({ key: "location", material: true, question: "Which city or area should I search near?" });
   if (BUY.test(r.query) && !has(/^(budget|price|max_price|price_max)/i) && !/[$₹€£]\s?[0-9]|\b[0-9]+\s?(usd|inr|rs|dollars|rupees)\b/i.test(r.query))

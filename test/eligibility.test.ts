@@ -1,7 +1,7 @@
 import {describe,it,expect} from 'vitest';
 import {SearchRequestSchema} from '../src/contracts/search.js';
 import {eligibility,gateResults} from '../src/core/eligibility.js';
-import {formProviderQuery} from '../src/core/context-pull.js';
+import {formProviderQuery,heuristicGaps} from '../src/core/context-pull.js';
 import {normalizeIntentFormation} from '../src/core/intent-formation.js';
 const r=SearchRequestSchema.parse({tenant_id:'test',query:'I want to find a stay around Koramangala Bangalore for one night 30th Sept Under 1500-1800 rs., pull in all possible discounts for the same. Find hotels which are actually super clean, well rated, newly built, 3 star preferred.'});
 const m:any={intent:r.query,factors:[]};
@@ -34,3 +34,13 @@ it('does not branch on model-imagined price and availability categories for one 
 it('rejects social videos with an incidental hotel mention as direct properties',()=>{const y=x('https://www.facebook.com/bhavaniresidency/videos/123','+91 95130 60062 ( HEMANTH ) This hotel has 3 single bed ...');const g=eligibility(r,m,y);expect(g.eligible).toBe(false);expect(g.reasons.join(' ')).toMatch(/social or discussion page/);expect(g.reasons.join(' ')).toMatch(/no named hotel property/)});
 
 it('excludes generic product collections but keeps a named item for later field verification',()=>{const q=SearchRequestSchema.parse({tenant_id:'t',query:'laptop 16GB RAM under ₹50000 in India'});const m:any={intent:q.query,factors:[]};const g=gateResults(q,m,[x('https://example.com/collection/laptops-under-50000','Laptops Under 50000'),x('https://example.com/laptops/acer-aspire-lite-al15','Acer Aspire Lite AL15-52 16GB RAM')]);expect(g.excluded).toHaveLength(1);expect(g.retained.map(v=>v.result.title)).toEqual(['Acer Aspire Lite AL15-52 16GB RAM']);expect(g.retained[0]?.verification.price.status).toBe('unverified')});
+
+it('a date-lunch place is a local venue, not a discovery app',()=>{
+ const q=SearchRequestSchema.parse({tenant_id:'t',query:'Find a perfect date place for me for tomorrow lunch.',permissions:{may_pull_context:true}});
+ expect(answerStrategy(q)?.unit).toBe('local_business');
+ expect(heuristicGaps(q).map((g:any)=>g.key)).toContain('location');
+ const m:any={intent:q.query,factors:[]};
+ const g=gateResults(q,m,[{...x('https://www.seemor.ai/','Seemor | The Right Restaurant. Every Time.'),snippet:'This app helps you find and choose the right restaurant for your date.'},x('https://example.com/places/olive','Olive Bistro Koramangala')]);
+ expect(g.excluded.map(z=>z.url)).toContain('https://www.seemor.ai/');
+ expect(g.retained.map(z=>z.result.title)).toContain('Olive Bistro Koramangala');
+});

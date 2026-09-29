@@ -16,7 +16,7 @@ export function validateModelParameters(raw:unknown,r:SearchRequest,intent:Inten
  if(!raw||typeof raw!=="object"||!Array.isArray((raw as any).parameters))throw new Error("Gemini did not return parameters");
  const proposals=(raw as {parameters:unknown[]}).parameters;
  if(proposals.length<1||proposals.length>60)throw new Error("parameter count outside 1..60");
- const seen=new Set<string>();const items:CuratedParameter[]=[];
+ const seen=new Set<string>();const items:CuratedParameter[]=[];let discardedUnsafeWeight=0;
  for(const candidate of proposals){
   if(!candidate||typeof candidate!=="object")throw new Error("invalid parameter");
   const p=candidate as ProposedParameter;
@@ -25,7 +25,9 @@ export function validateModelParameters(raw:unknown,r:SearchRequest,intent:Inten
   if(p.query_reference&&(!r.query.toLowerCase().includes(p.query_reference.toLowerCase())||p.class==="psychological"))throw new Error("query_reference requires a functional exact query phrase");
   if(!keyPattern.test(key)||!["functional","psychological"].includes(p.class)||typeof p.why!=="string"||!p.why.trim()||p.why.length>500||!Number.isFinite(p.weight_percent)||p.weight_percent<0||p.weight_percent>100||typeof p.compulsory!=="boolean")throw new Error("invalid parameter shape");
   const id=`${p.class}:${key}`;if(seen.has(id))throw new Error("duplicate parameter");seen.add(id);
-  if(p.class==="psychological"&&(p.hard||restricted.test(key)))throw new Error("unsupported psychological hard/sensitive factor");
+  // A single unsafe proposed human factor is discarded, not promoted and not allowed
+  // to erase the functional parameters. Its percentage is redistributed proportionally.
+  if(p.class==="psychological"&&(p.hard||restricted.test(key))){discardedUnsafeWeight+=p.weight_percent;continue;}
   const explicit=Object.entries(r.hard_constraints).find(([k])=>canonicalContextKey(k)===key);
   const candidates=r.context.filter(c=>canonicalContextKey(c.key)===key&&(c.class==="psychological"?"psychological":"functional")===p.class);
   const fresh=candidates.filter(c=>!c.expires_at||Date.parse(c.expires_at)>Date.now()).filter(c=>key!=="location"||!c.observed_at||Date.now()-Date.parse(c.observed_at)<15*60_000)
@@ -45,7 +47,8 @@ export function validateModelParameters(raw:unknown,r:SearchRequest,intent:Inten
  // User-specified structured constraints cannot be silently dropped by a model.
  for(const k of Object.keys(r.hard_constraints))if(!seen.has(`functional:${canonicalContextKey(k)}`))throw new Error(`omitted hard constraint ${k}`);
  const sum=items.reduce((n,x)=>n+x.priority,0);
- if(Math.abs(sum-100)>.001)throw new Error(`parameter weights total ${sum}, not 100`);
+ if(discardedUnsafeWeight>0&&sum>0&&Math.abs(sum+discardedUnsafeWeight-100)<=.001)for(const item of items)item.priority=item.priority/sum*100;
+ else if(Math.abs(sum-100)>.001)throw new Error(`parameter weights total ${sum}, not 100`);
  return {...baseline,intent,parameters:items,conflicts:items.filter(p=>p.state==="conflict").map(p=>p.key),criticality_cutoff:70,generation:"gemini",weight_total_percent:100};
 }
 export function fallbackManifest(baseline:CuratedParameterManifest):ModelManifest {
