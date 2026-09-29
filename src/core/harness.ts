@@ -42,6 +42,10 @@ export class SearchHarness {
     const activeRequest={...request,context:request.context.filter(c=>(!c.expires_at||Date.parse(c.expires_at)>Date.now())&&(canonicalContextKey(c.key)!=="location"||!c.observed_at||Date.now()-Date.parse(c.observed_at)<15*60_000))};
     record('1_request', {query:request.query, tenant_id:request.tenant_id, caller_fill_complete:request.caller_fill_complete,curation_revision_of:request.curation_revision_of, context:contextUsed(activeRequest),permissions:request.permissions,limits:request.limits});
     const intent=await this.writer.form?.(activeRequest)??fallbackIntentFormation(activeRequest);
+    const dateLunch=/\bdate\b/i.test(request.query)&&/\blunch\b/i.test(request.query);
+    // A model's mood description is not owner evidence. Keep the user wording
+    // when it invents romantic/quiet/special qualities for a date lunch.
+    if(dateLunch&&!/\b(?:romantic|special|quiet)\b/i.test(request.query)&&/\b(?:romantic|special|quiet)\b/i.test(intent.decision))intent.decision=request.query;
     record('1a_prefill_query_formation',{...formProviderQuery(activeRequest,"pre_fill"),intent});
     const baseline = curateParameters(activeRequest, undefined, request.curation_revision_of,intent);
     record("1_baseline_parameters",baseline);
@@ -104,6 +108,12 @@ export class SearchHarness {
     const finalMandate=await this.writer.write(effective,curated);
     if(curated.generation==="fallback")record("parameter_generation_fallback",{reason:curated.fallback_reason??"Gemini parameter generation unavailable or invalid; deterministic baseline used"});
     if(intent.strategy==="across_categories")finalMandate.category="general_consumer_search";
+    if(dateLunch&&intent.answer_unit==='local_business'){
+      // The mandate writer is not allowed to collapse a lunch-date answer into
+      // restaurants or import an unstated mood after understanding widened it.
+      finalMandate.category='local_business';
+      finalMandate.intent=request.query;
+    }
     for(const p of curated.parameters.filter(p=>p.class==="psychological"&&p.state==="resolved"&&p.source==="query")){
       if(finalMandate.factors.some(f=>f.key===p.key&&f.class==="psychological"))continue;
       finalMandate.factors.push({key:p.key,class:"psychological",description:`Use the stated ${p.key.replace(/_/g," ")} to rank otherwise eligible results.`,value:p.value,weight:p.priority/100,confidence:1,hard:false,evidence:[{source:"query",reference:p.evidence[0]?.reference}]});
