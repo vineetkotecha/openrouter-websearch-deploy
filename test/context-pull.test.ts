@@ -128,3 +128,9 @@ it('collapses location_of_origin and origin without merging destination',()=>{
  expect(canonicalGaps([{key:'location_of_origin',material:true,question:'Where do you start?'},{key:'origin',material:true,question:'From where?'}]).map(x=>x.key)).toEqual(['origin']);
  expect(canonicalContextKey('origin_or_destination')).toBe('origin_or_destination');
 });
+
+it('passes a supplied search area into a model-identified local venue query',()=>{
+ const r=req({query:'A quiet spot for our anniversary meal tonight',context:[{key:'city',value:'Pune',source:'caller',confidence:.95,allowed_uses:['search']}]});
+ expect(formProviderQuery(r,'post_fill','local_business').provider_query).toBe('A quiet spot for our anniversary meal tonight in Pune');
+ expect(formProviderQuery(req({query:'A quiet spot for our anniversary meal tonight'}),'post_fill','local_business').provider_query).toBe('A quiet spot for our anniversary meal tonight');
+});

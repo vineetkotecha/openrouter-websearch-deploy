@@ -118,7 +118,7 @@ export class SearchHarness {
         plan.jobs=[...branches,...plan.jobs.filter(j=>j!==first)].slice(0,plan.budget.max_jobs);
       }else plan.notes.push("Ambiguous category: no discovery-capable job; category branches were not searched.");
     }
-    const formed=formProviderQuery(effective,"post_fill");
+    const formed=formProviderQuery(effective,"post_fill",intent.answer_unit);
     meta?.trace?.('5a_postfill_query_formation',{...formed,branches:branchQueries});
     for(const job of plan.jobs)job.query??=formed.provider_query;
     const decisions=await routeSubqueries(effective,finalMandate,plan.jobs.map(j=>({id:j.id,query:j.query!,candidates:j.candidates})));

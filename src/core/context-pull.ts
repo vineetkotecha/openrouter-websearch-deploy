@@ -75,7 +75,7 @@ export function localizeQuery(r: SearchRequest): SearchRequest {
 
 // Query formation keeps private context out of the provider string unless a scoped fact
 // changes retrieval. It does not infer a current location or a departure city.
-export function formProviderQuery(r: SearchRequest, phase: "pre_fill" | "post_fill") {
+export function formProviderQuery(r: SearchRequest, phase: "pre_fill" | "post_fill",answerUnit?:string) {
   const localized=localizeQuery(r);
   let query=localized.query;
   const used:string[]=[];
@@ -92,6 +92,11 @@ export function formProviderQuery(r: SearchRequest, phase: "pre_fill" | "post_fi
     }
     if(values.has("origin")&&/\bweekend trip\b/i.test(query)&&!query.toLowerCase().includes(values.get("origin")!.toLowerCase())) {query+=` from ${values.get("origin")}`;used.push("origin")}
     if(values.has("use_case")&&/\bbest laptop\b/i.test(query)&&!query.toLowerCase().includes(values.get("use_case")!.toLowerCase())) {query+=` for ${values.get("use_case")}`;used.push("use_case")}
+  }
+  if(phase==='post_fill'&&answerUnit==='local_business'&&query===r.query){
+    const item=r.context.find(c=>canonicalContextKey(c.key)==='location'&&c.class!=='psychological'&&(!c.expires_at||Date.parse(c.expires_at)>Date.now())&&(!c.allowed_uses||c.allowed_uses.includes('search'))&&c.confidence>=.7&&typeof c.value==='string'&&c.value.trim());
+    const loc=typeof item?.value==='string'?item.value.trim().slice(0,120):typeof r.hard_constraints.location==='string'?r.hard_constraints.location.trim().slice(0,120):'';
+    if(loc&&!query.toLowerCase().includes(loc.toLowerCase())){query+=` in ${loc}`;used.push('location');}
   }
   if(hotelPropertySearch(r)) {
     // The answer is a hotel, not a collection of hotels. Keep constraints as
