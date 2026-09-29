@@ -22,7 +22,7 @@ export async function jevRerank(r:SearchRequest,m:Mandate,items:Ranked[],score?:
   if(score){graded=await Promise.all(indices.map(async i=>{try{return{i,value:await score(r,m,short[i]!)}}catch{return{i,value:NaN}}}));}
   else {
     try {
-      const questions=Object.fromEntries(indices.map((i)=>[`fit_${i}`,noul(`Does candidate ${i} directly serve the mandate and its evidenced decision preferences while respecting the stated constraints?`,{true:"Direct, supported and preferred fit",false:"Tangential, contradictory or unsupported"})]));
+      const questions=Object.fromEntries(indices.map((i)=>[`fit_${i}`,noul(`Among candidates already eligible under hard constraints, how well does candidate ${i} fit the evidenced SOFT decision preferences? Respect the stated search purpose (for example, a date lunch), without treating unstated preferences such as quiet or romantic as facts. Do not change factual support or eligibility; use only supplied decision factors and the explicit query.`,{true:"Strong fit on evidenced soft preferences",false:"Weak fit on evidenced soft preferences"})]));
       const candidates=indices.map(i=>({id:i,title:short[i]!.title,snippet:short[i]!.snippet.slice(0,800),reason:short[i]!.reason,faithfulness:short[i]!.faithfulness,eligible:eligible(m,short[i]!)}));
       const out=await client!.systemOne({model:process.env.JEV_MODEL??"jev-1.13.0",state:{query:r.query,intent:m.intent,hard_constraints:JSON.parse(JSON.stringify(r.hard_constraints)),decision_factors:JSON.parse(JSON.stringify(evidencedDecisionFactors(m))),candidates},questions});
       input_tokens=out.usage.input_tokens||0;output_tokens=out.usage.output_tokens||0;

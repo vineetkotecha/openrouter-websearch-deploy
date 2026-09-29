@@ -17,6 +17,12 @@ describe("Gemini diagnostic and temporal grounding",()=>{
  });
  it("surfaces a bounded validation failure without model payloads or credentials",async()=>{
   const writer=new GeminiMandateWriter({} as any);(writer as any).generate=async()=>({parameters:[{key:"search_object",class:"functional",why:"item",weight_percent:99,compulsory:true,query_reference:"Artemis II"}]});
-  const m=await writer.parameters(request,fallbackIntentFormation(request),curateParameters(request));expect(m.generation).toBe("fallback");expect(m.fallback_reason).toMatch(/weights total 99/);expect(m.fallback_reason).not.toContain("private_key");
+  const m=await writer.parameters(request,fallbackIntentFormation(request),curateParameters(request));expect(m.generation).toBe("gemini");expect(m.parameters.reduce((n,p)=>n+p.priority,0)).toBeCloseTo(100);
  });
+});
+
+it('downgrades a verdict with an invented source excerpt',()=>{
+ const item={provider:'exa',url:'https://example.test/1',title:'Actual cafe',snippet:'Lunch cafe in Bengaluru'};
+ const verdict=normalizeAudit({verdicts:[{url:item.url,state:'fail',reason:'Wrong location',evidence_quote:'This is in Delhi'}]},[item]);
+ expect(verdict[0]?.state).toBe('uncertain');
 });

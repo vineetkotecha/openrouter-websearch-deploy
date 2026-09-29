@@ -102,3 +102,10 @@ it('stops a local search after query understanding without a second model call',
  expect(second).toMatchObject({kind:'user_question',gap:'location'});
  expect(parameterCalls).toBe(0);expect(providerCalls).toBe(0);
 });
+
+it('records one date-lunch intent with several answer forms but no rival intent branches',()=>{
+ const r=SearchRequestSchema.parse({tenant_id:'t',query:'Find a perfect date place for me for tomorrow lunch.'});
+ const f=normalizeIntentFormation({answer_unit:'local_business',decision:'Find a suitable individual place for a date lunch tomorrow',answer_forms:[{kind:'restaurant',why:'lunch'},{kind:'cafe',why:'lunch'},{kind:'other lunch experience',why:'date place'}],required_context:[{key:'location',question:'Which area?',why:'Local results need an area'}]},r);
+ expect(f.answer_forms.map(x=>x.kind)).toEqual(['restaurant','cafe','other lunch experience']);
+ expect(f.strategy).toBe('focused');expect(f.search_branches).toEqual([]);
+});

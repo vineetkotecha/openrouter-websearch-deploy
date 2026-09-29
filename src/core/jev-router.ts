@@ -12,7 +12,7 @@ export async function routeSubqueries(request:SearchRequest, mandate:Mandate, jo
   jobs.forEach((job,i)=>{const usable=job.candidates.filter(c=>!c.excluded);if(usable.length>1)questions[`provider_${i}`]=choice(`First provider for subquery ${i}: ${job.query.slice(0,180)}?`,Object.fromEntries(usable.map(c=>[c.provider,descriptions[c.provider]??'General web search provider'])))});
   if(!Object.keys(questions).length)return fallback;
   const client=new TypeSafeClient({apiKey:process.env.TYPESAFE_API_KEY,timeout:10_000,retry:{maxRetries:0}} as any);
-  const out=await client.systemOne({model:process.env.JEV_MODEL??'jev-1.13.0',state:{intent:mandate.intent,hard_constraints:JSON.parse(JSON.stringify(request.hard_constraints)),subqueries:jobs.map(j=>({id:j.id,query:j.query,available_providers:j.candidates.filter(c=>!c.excluded).map(c=>c.provider)}))},questions});
+  const out=await client.systemOne({model:process.env.JEV_MODEL??'jev-1.13.0',state:{intent:mandate.intent,hard_constraints:JSON.parse(JSON.stringify(request.hard_constraints)),subqueries:jobs.map(j=>({id:j.id,query:j.query,available_providers:j.candidates.filter(c=>!c.excluded).map(c=>({provider:c.provider,description:descriptions[c.provider]??"General web search provider"}))}))},questions});
   return jobs.map((job,i)=>{const ans=(out.answers as any)[`provider_${i}`],chosen=String(ans?.choice??'');return ans?.confidence>=.45&&job.candidates.some(c=>c.provider===chosen&&!c.excluded)?{job:job.id,selected:chosen,policy:`jev-batch:${out.model}`}:{job:job.id,selected:undefined,policy:'capability-v1'}});
  }catch{return fallback}
 }

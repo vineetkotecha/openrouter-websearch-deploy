@@ -13,7 +13,7 @@ import { extractSurvivors } from "./verify.js";
 import { fillSummary } from "./fill.js";
 import { heuristicGaps, canonicalContextKey, contextRequest, contextUsed, formProviderQuery, type ContextRequest } from "./context-pull.js";
 import type { LlmJudge } from "./faithfulness.js";
-import { routeSubqueries } from "./jev-router.js";
+import {requiredSearchArea,requiredQueryTerms,purposeTerms,validatedFinalQuery} from "./final-query.js";import { routeSubqueries } from "./jev-router.js";
 import { executePlan, planJobs, ProviderHealth, type PlannedJob } from "./jobs.js";
 
 export interface EpisodeStore { save(x: { id: string; tenantId: string; request: SearchRequest; response: SearchResponse; mandate?: unknown; expiresAt: Date; principal?: unknown; surface?: string; startedAt?: number }): Promise<void>; outcome(x: unknown): Promise<void> }
@@ -105,22 +105,30 @@ export class SearchHarness {
     }
     meta?.trace?.('6_final_mandate_after_fill',{id:finalMandate.id,curation_id:curated.id});
     const fillDecision={ask:[],defaults:optional.map(p=>({key:p.key,reason:"Good-to-have parameter absent; do not infer it"})),stale:curated.parameters.filter(p=>p.state==="stale").map(p=>p.key)};
-    // Each decomposed job gets its own query and provider choice. The planner's
-    // capability filter remains the authority for eligible providers and fallbacks.
+    // The final query is model-written after fill. Validate the area before any
+    // decomposition; model-generated job queries cannot erase that area either.
+    const formed=formProviderQuery(effective,"post_fill",intent.answer_unit);
+    const requiredArea=requiredSearchArea(effective,intent);
+    const requiredTerms=[...requiredQueryTerms(effective),...purposeTerms(effective)];
+    let finalQuery=formed.provider_query;
+    if(this.writer.finalQuery){
+      try {finalQuery=validatedFinalQuery(await this.writer.finalQuery(effective,intent,curated,formed.provider_query),formed.provider_query,requiredArea,requiredTerms)}
+      catch { /* deterministic safe fallback stays visible in the trace */ }
+    }
+    meta?.trace?.('5a_postfill_query_formation',{...formed,final_query:finalQuery,model_written:finalQuery!==formed.provider_query});
     const plan = planJobs(effective, finalMandate, this.providers, this.health, undefined, curated);
-    try { const proposed=plan.jobs.length?await this.writer.decompose?.(effective,finalMandate,plan.jobs.map(j=>({id:j.id,query:j.query??effective.query}))):undefined;if(proposed)for(const job of plan.jobs)if(proposed[job.id])job.query=proposed[job.id]; } catch {plan.notes.push("Gemini decomposition unavailable; retained capability-based job plan.");}
+    const queryRequest={...effective,query:finalQuery};
+    try { const proposed=plan.jobs.length?await this.writer.decompose?.(queryRequest,finalMandate,plan.jobs.map(j=>({id:j.id,query:finalQuery})),intent):undefined;if(proposed)for(const job of plan.jobs)if(proposed[job.id])job.query=validatedFinalQuery(proposed[job.id],finalQuery,requiredArea,requiredTerms); } catch {plan.notes.push("Gemini decomposition unavailable; retained final query for capability-based job plan.");}
     const branchQueries=intent.strategy==="across_categories"&&!effective.context.some(c=>canonicalContextKey(c.key)==="intent_category")?intent.search_branches:[];
     if(branchQueries.length){
       const first=plan.jobs.find(j=>j.kind==="discovery");
       if(first){
         const allowed=Math.min(branchQueries.length,Math.max(1,plan.budget.max_jobs));
-        const branches=Array.from({length:allowed},(_,i)=>({...first,id:`category_${i+1}`,query:branchQueries[i]!.query,reason:`Explore ${branchQueries[i]!.category} without presuming a single category.`,priority:80}));
+        const branches=Array.from({length:allowed},(_,i)=>({...first,id:`category_${i+1}`,query:validatedFinalQuery(branchQueries[i]!.query,finalQuery,requiredArea,requiredTerms),reason:`Explore ${branchQueries[i]!.category} without presuming a single category.`,priority:80}));
         plan.jobs=[...branches,...plan.jobs.filter(j=>j!==first)].slice(0,plan.budget.max_jobs);
       }else plan.notes.push("Ambiguous category: no discovery-capable job; category branches were not searched.");
     }
-    const formed=formProviderQuery(effective,"post_fill",intent.answer_unit);
-    meta?.trace?.('5a_postfill_query_formation',{...formed,branches:branchQueries});
-    for(const job of plan.jobs)job.query??=formed.provider_query;
+    for(const job of plan.jobs)job.query=validatedFinalQuery(job.query,finalQuery,requiredArea,requiredTerms);
     const decisions=await routeSubqueries(effective,finalMandate,plan.jobs.map(j=>({id:j.id,query:j.query!,candidates:j.candidates})));
     for(const [i,job] of plan.jobs.entries()){
       const decision=decisions[i]!;
@@ -131,7 +139,7 @@ export class SearchHarness {
     meta?.trace?.('5_job_plan',plan);
     const deadline = Math.min(this.c.SEARCH_TIMEOUT_MS, request.limits.latency_ms);
 
-    const providerRequest={...effective,query:formed.provider_query};
+    const providerRequest={...effective,query:finalQuery};
     const call = async (p: SearchProvider, job: PlannedJob) => {
       const ctl = new AbortController(), s = Date.now();
       const providerDeadline = p.name === "serpapi" ? Math.min(deadline, 6000) : deadline;
@@ -225,7 +233,8 @@ export class SearchHarness {
     const allowed=new Set(lateGate.retained.map(x=>x.result.url).filter(url=>!veto.has(url)));
     const initialRank=rankedAll.map(x=>allowed.has(x.url)?x:{...x,faithfulness:{state:"unverified" as const,score:x.faithfulness.score}});
     meta?.trace?.('9_initial_rank',initialRank);
-    const reranked=await jevRerank(effective,finalMandate,initialRank);
+    const eligibleForJev=initialRank.filter(x=>allowed.has(x.url));
+    const reranked=await jevRerank(effective,finalMandate,eligibleForJev);
     if(reranked.reason!=="reranked")limitations.push(`Jev rerank not completed: ${reranked.reason}.`);
     meta?.trace?.('10_jev_rerank',reranked);
     const response: SearchResponse = {
@@ -244,7 +253,7 @@ export class SearchHarness {
         version: 1, query_class: plan.classification.query_class, ladder: plan.classification.ladder, signals: plan.classification.signals,
         budget: plan.budget, jobs: plan.jobs.map(j => ({ id: j.id, kind: j.kind, query:j.query, routing_policy:j.routing_policy, primary: j.primary, fallback: j.fallback, reason: j.reason, priority:j.priority, factor_keys:j.factor_keys, candidates: j.candidates })),
         runs: [...exec.runs,...repairRuns], fallback_used: exec.fallback_used, escalated: exec.escalated, skipped: exec.skipped,
-        known_urls: plan.classification.known_urls, extraction: report, context: contextUsed(effective), curation:curated, eligibility:{excluded:[...earlyGate.excluded,...lateGate.excluded],retained:allowed.size,audit}, formation:{first:firstPass.formed_query,post:formed.provider_query,revision_of:request.curation_revision_of,used_keys:formed.context_keys}, gaps: finalMandate.gaps.map(g => ({ key: g.key, material: g.material })), fill: plan.classification.structured_fields.length ? fillSummary(plan.classification.structured_fields, extracted.map(x => (x as any).fields)) : undefined, notes: [...plan.notes,...fillDecision.defaults.map(x=>`default:${x.key} - ${x.reason}`),`jev_rerank: ${reranked.successful}/${reranked.attempted}; ${reranked.reason}; ${reranked.latency_ms} ms; tokens ${reranked.usage.input_tokens}/${reranked.usage.output_tokens}`],
+        known_urls: plan.classification.known_urls, extraction: report, context: contextUsed(effective), curation:curated, eligibility:{excluded:[...earlyGate.excluded,...lateGate.excluded],retained:allowed.size,audit}, formation:{first:firstPass.formed_query,post:finalQuery,revision_of:request.curation_revision_of,used_keys:formed.context_keys}, gaps: finalMandate.gaps.map(g => ({ key: g.key, material: g.material })), fill: plan.classification.structured_fields.length ? fillSummary(plan.classification.structured_fields, extracted.map(x => (x as any).fields)) : undefined, notes: [...plan.notes,...fillDecision.defaults.map(x=>`default:${x.key} - ${x.reason}`),`jev_rerank: ${reranked.successful}/${reranked.attempted}; ${reranked.reason}; ${reranked.latency_ms} ms; tokens ${reranked.usage.input_tokens}/${reranked.usage.output_tokens}`],
       },
     };
     meta?.trace?.('11_response',response);
