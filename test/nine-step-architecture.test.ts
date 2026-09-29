@@ -1,7 +1,7 @@
 import {describe,it,expect} from "vitest";
 import {SearchRequestSchema} from "../src/contracts/search.js";
 import {curateParameters} from "../src/core/parameter-curation.js";
-import {fallbackIntentFormation} from "../src/core/intent-formation.js";
+import {fallbackIntentFormation,normalizeIntentFormation} from "../src/core/intent-formation.js";
 import {validateModelParameters,fallbackManifest,normalizeQuestions,normalizeAudit} from "../src/core/architecture.js";
 import {HeuristicMandateWriter} from "../src/core/mandate.js";
 import {jevRerank} from "../src/core/jev-rerank.js";
@@ -34,4 +34,13 @@ describe("repair and complete-pool audit",()=>{
   const h=new SearchHarness({SEARCH_TIMEOUT_MS:1000} as any,writer,providers as any,new MemoryStore(),{fetcher:(async()=>({ok:false})) as any});
   const out:any=await h.search(query);expect(out.status).toBe("complete");expect(new Set(calls).size).toBeLessThanOrEqual(2);expect(calls.filter(x=>x==="tavily").length).toBeLessThanOrEqual(1);expect(out.plan.eligibility.audit.some((x:any)=>x.state==="pass")).toBe(true);
  });
+});
+
+it('groups related required fills in one conversational question but covers every key',()=>{
+ const r=SearchRequestSchema.parse({tenant_id:'t',query:'A place for dinner'});
+ const f=normalizeIntentFormation({answer_unit:'local_business',required_context:[{key:'city',question:'Where?',why:'Area'},{key:'cuisine',question:'What food?',why:'Taste'}]},r);
+ const b=curateParameters(r,undefined,undefined,f);
+ const m=fallbackManifest(b);
+ expect(normalizeQuestions({questions:[{keys:['location','cuisine'],question:'Where should I look, and what food are you in the mood for?'}]},m)).toEqual(['Where should I look, and what food are you in the mood for?']);
+ expect(normalizeQuestions({questions:[{keys:['location'],question:'Where should I look?'}]},m)).toContain('What food?');
 });

@@ -58,3 +58,17 @@ describe('query-understanding contract',()=>{
   expect(()=>validateModelParameters({parameters:[{key:'search_object',class:'functional',why:'target',weight_percent:100,compulsory:true,query_reference:'spot'}]},r,f,b)).toThrow('omitted required context location');
  });
 });
+
+it('orders first-stage context ahead of model extras and deduplicates canonical keys',async()=>{
+ const r=SearchRequestSchema.parse({tenant_id:'t',query:'A quiet spot for our anniversary meal tonight',permissions:{may_pull_context:true}});
+ const f=normalizeIntentFormation({answer_unit:'local_business',required_context:[{key:'city',question:'Which city?',why:'Area'},{key:'geographic_location',question:'Where?',why:'Area'},{key:'availability_check',question:'Have you checked availability?',why:'Current access'}]},r);
+ const base=curateParameters(r,undefined,undefined,f);
+ expect(base.parameters.filter(x=>x.key==='location')).toHaveLength(1);
+ const writer=new HeuristicMandateWriter();
+ const h=new SearchHarness({SEARCH_TIMEOUT_MS:1000} as any,{write:(x:any)=>writer.write(x),form:async()=>f,parameters:async()=>({...base,generation:'gemini' as const,weight_total_percent:100,parameters:[{...base.parameters[0]!,key:'cuisine_preference',state:'missing' as const,priority:90,compulsory:true},...base.parameters]})},[],new MemoryStore());
+ const out:any=await h.search(r);
+ expect(out.kind).toBe('context_request');
+ expect(out.requested_context[0].key).toBe('location');
+ expect(out.requested_context.filter((x:any)=>x.key==='location')).toHaveLength(1);
+ expect(out.requested_context.some((x:any)=>x.key==='availability_check')).toBe(false);
+});

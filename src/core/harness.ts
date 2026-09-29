@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { fallbackManifest, type ModelManifest, type AuditVerdict } from "./architecture.js";
 import { curateParameters, curatedRequest } from "./parameter-curation.js";
-import { fallbackIntentFormation, hotelPropertySearch } from "./intent-formation.js";
+import { fallbackIntentFormation, hotelPropertySearch, validatedIntentRequirements } from "./intent-formation.js";
 import { jevRerank } from "./jev-rerank.js";
 import type { Config } from "../config.js";
 import type { ProviderResult, SearchRequest, SearchResponse } from "../contracts/search.js";
@@ -45,20 +45,25 @@ export class SearchHarness {
     // Stage 5 asks the calling agent to inspect only its own permitted context.
     // No mandate is written until the two fill stages are finished.
     const curated=firstPass;
+    const understoodKeys=new Set(validatedIntentRequirements(activeRequest,intent).map(x=>canonicalContextKey(x.key)));
     const missing=curated.parameters.filter(p=>p.state!=="resolved"&&p.allowed_uses.includes("ask"));
-    const necessary=missing.filter(p=>p.compulsory);
-    const optional=missing.filter(p=>!p.compulsory);
-    meta?.trace?.('2_initial_parameter_curation',{manifest:curated,missing:missing.map(p=>p.key)});
-    if(missing.length&&request.permissions.may_pull_context&&!request.caller_fill_complete){
-      const first=missing[0]!;const out=contextRequest(episode_id,{key:first.key,question:first.question??`What should I know about ${first.key.replace(/_/g," ")}?`},request);
-      out.requested_context=missing.map(p=>({key:p.key,why:`Check permitted agent context for ${p.key}.`,accepted_sources:["caller" as const,"prior_outcome" as const],scope:request.permissions.scopes.length?request.permissions.scopes:["this_search"]}));
+    // First-stage requirements outrank model-produced extras, regardless of the
+    // second-stage percentage weights. Never ask duplicate canonical keys.
+    missing.sort((a,b)=>Number(understoodKeys.has(canonicalContextKey(b.key)))-Number(understoodKeys.has(canonicalContextKey(a.key))));
+    const distinctMissing=[...new Map(missing.map(p=>[`${p.class}:${canonicalContextKey(p.key)}`,p])).values()];
+    const necessary=distinctMissing.filter(p=>p.compulsory);
+    const optional=distinctMissing.filter(p=>!p.compulsory);
+    meta?.trace?.('2_initial_parameter_curation',{manifest:curated,missing:distinctMissing.map(p=>p.key)});
+    if(distinctMissing.length&&request.permissions.may_pull_context&&!request.caller_fill_complete){
+      const first=distinctMissing[0]!;const out=contextRequest(episode_id,{key:first.key,question:first.question??`What should I know about ${first.key.replace(/_/g," ")}?`},request);
+      out.requested_context=distinctMissing.map(p=>({key:p.key,why:`Check permitted agent context for ${p.key}.`,accepted_sources:["caller" as const,"prior_outcome" as const],scope:request.permissions.scopes.length?request.permissions.scopes:["this_search"]}));
       out.question="Return only permitted agent-known context for the requested parameters.";out.curation_id=curated.id;
       out.how_to_answer="Caller context stage only. Do not ask the user here. Supply evidenced agent-known values, then call again with caller_fill_complete:true to grade any remainder.";
       meta?.trace?.('3_caller_context_request',out);return out;
     }
     meta?.trace?.('4_grade_after_agent_fill',{necessary:necessary.map(p=>p.key),good_to_have:optional.map(p=>p.key)});
     if(necessary.length){
-      const first=necessary[0]!,questions=await (this.writer.questions?.(activeRequest,curated)??Promise.resolve(necessary.map(p=>p.question||`What should I know about ${p.key.replace(/_/g," ")}?`)));
+      const first=necessary[0]!,questions=await (this.writer.questions?.(activeRequest,{...curated,parameters:[...necessary,...curated.parameters.filter(p=>!necessary.includes(p))]})??Promise.resolve(necessary.map(p=>p.question||`What should I know about ${p.key.replace(/_/g," ")}?`)));
       const question=questions.join(" "),gaps=necessary.map(p=>p.key);
       // A necessary user question must be handled via the caller. Neither an
       // unavailable resume store nor a declined question licenses retrieval.
