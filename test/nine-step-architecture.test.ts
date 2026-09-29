@@ -44,3 +44,10 @@ it('groups related required fills in one conversational question but covers ever
  expect(normalizeQuestions({questions:[{keys:['location','cuisine'],question:'Where should I look, and what food are you in the mood for?'}]},m)).toEqual(['Where should I look, and what food are you in the mood for?']);
  expect(normalizeQuestions({questions:[{keys:['location'],question:'Where should I look?'}]},m)).toContain('What food?');
 });
+
+it('does not imply a booking from a search-only question',()=>{
+ const r=SearchRequestSchema.parse({tenant_id:'t',query:'A quiet spot for our anniversary meal tonight'});
+ const f=normalizeIntentFormation({answer_unit:'local_business',required_context:[{key:'city',question:'Where should I look?',why:'Area'},{key:'party_size',question:'How many people?',why:'Table size'}]},r);
+ const m=fallbackManifest(curateParameters(r,undefined,undefined,f));
+ expect(normalizeQuestions({questions:[{keys:['location','party_size'],question:'Where and for how many people will I be making a reservation?'}]},m)).toEqual(['Where should I look?','How many people?']);
+});
