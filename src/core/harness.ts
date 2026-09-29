@@ -186,7 +186,7 @@ export class SearchHarness {
     // One bounded repair is attempted only when the first retrieval is empty or
     // every candidate visibly fails the model check, and remaining provider budget allows it.
     const firstGate=gateResults(effective,finalMandate,pool,intent.answer_unit);
-    const noViableCandidates=pool.length>0&&firstGate.retained.every(x=>audit.some(v=>v.url===x.result.url&&v.state==="fail"));
+    const noViableCandidates=pool.length>0&&(firstGate.retained.length===0||firstGate.retained.every(x=>audit.some(v=>v.url===x.result.url&&v.state==="fail")));
     if((!pool.length||noViableCandidates)&&exec.runs.length<request.limits.max_provider_calls){
       const failedProviders=new Set(exec.runs.map(x=>x.provider));
       const repair=plan.jobs.flatMap(j=>j.candidates.filter(c=>!c.excluded&&!failedProviders.has(c.provider)).map(c=>({job:j,provider:c.provider}))).find(x=>this.providers.some(p=>p.name===x.provider&&p.enabled()));
