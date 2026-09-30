@@ -20,7 +20,7 @@ export function normalizeDecisiveFacts(raw:unknown,vertical:FactVertical,page:st
    if(typeof f.value!=='number'||!Number.isFinite(f.value)||f.value<=0)continue;
    const nums=[...quote.matchAll(/\d[\d,]*(?:\.\d+)?/g)].map(m=>Number(m[0].replace(/,/g,'')));if(!nums.includes(f.value))continue;
    if(/price/.test(key)&&!/(?:₹|INR|Rs\.?)/i.test(quote))continue;
-   if(key==='ram_gb'&&(!/\b(?:RAM|DDR[345]|system memory|memory capacity)\b/i.test(quote)||!/\bGB\b/i.test(quote)||/\b(?:up to|maximum|expandable|supports?)\b/i.test(quote)))continue;
+   if(key==='ram_gb'&&(!/\b(?:RAM|DDR[345]|system memory|memory capacity)\b/i.test(quote)||!/(?:\d\s*GB\b)/i.test(quote)||/\b(?:up to|maximum|expandable|supports?)\b/i.test(quote)))continue;
    if(key==='price_for_two_inr'&&!/\b(?:for two|for 2|two people|2 people|two persons|2 persons)\b/i.test(quote))continue;
   }
   out[key]={value:f.value,state:'supported',evidence:quote,method:`llm_${vertical}_literal_evidence`};
