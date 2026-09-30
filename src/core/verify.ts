@@ -24,11 +24,11 @@ export async function extractSurvivors(input: ProviderResult[], signal?: AbortSi
       report.attempted++;
       const per = AbortSignal.timeout(o.timeoutMs ?? 15000);
       const sig = signal ? AbortSignal.any([signal, per]) : per;
-      const r = await f(`https://r.jina.ai/${x.url}`, { headers: { Accept: "text/plain", ...(process.env.JINA_API_KEY ? { Authorization: `Bearer ${process.env.JINA_API_KEY.trim()}` } : {}), "X-Retain-Images": "none" }, signal: sig });
+      const r = await f(`https://r.jina.ai/${x.url}`, { headers: { Accept: "text/plain", ...(process.env.JINA_API_KEY ? { Authorization: `Bearer ${process.env.JINA_API_KEY.trim()}` } : {}) }, signal: sig });
       if (!r.ok) { report.failed_http++; return x; }
       const remaining = pageChars;
       if (remaining <= 0) { report.skipped_budget++; return x; }
-      const body = (await Promise.race([r.text(), new Promise<string>((_, rej) => sig.addEventListener("abort", () => rej(new Error("extract timeout")), { once: true }))])).slice(0, remaining);
+      const body = (await Promise.race([r.text(), new Promise<string>((_, rej) => sig.addEventListener("abort", () => rej(new Error("extract timeout")), { once: true }))])).replace(/!\[[^\]]*\]\([^)]*\)/g, "").slice(0, remaining);
       report.chars += body.length; report.extracted++;
       const fa = o.judge ? await gradeWithLlm(x, body, o.judge) : gradeDeterministic(x, body);
       report[fa.state]++;

@@ -22,3 +22,10 @@ it('bounds LLM fact reads to fetched extraction targets and leaves failure missi
  const fail=await extractSurvivors(input,undefined,{max:1,vertical:'product',fields:['product_price_inr'],fetcher:(async()=>({ok:true,text:async()=>page})) as any,factReader:async()=>{throw Error('timeout')}});expect(fail.report.fact_errors).toBe(1);expect(fail.results[0]?.fields?.product_price_inr.state).toBe('missing');
  expect(decisiveFactPrompt('product',page,{url:input[0]!.url,title:'ThinkPad E16'},['ram_gb'])).toContain('16G shorthand alone is not explicit installed RAM evidence');
 });
+import {readFileSync} from 'node:fs';
+it('preserves sale block and specification table while stripping image tokens locally',async()=>{
+ const page=readFileSync(new URL('./fixtures-lenovo-reader.txt',import.meta.url),'utf8');let captured='';
+ await extractSurvivors([{provider:'known_url',url:'https://shop.example/e16',title:'NB TP E16',snippet:''}],undefined,{max:1,maxChars:24000,tokenBudget:6000,vertical:'product',factReader:async(_v,text)=>{captured=text;return {}},fetcher:(async(_u:any,o:any)=>{expect(o.headers['X-Retain-Images']).toBeUndefined();return {ok:true,text:async()=>page}}) as any});
+ expect(captured).toContain('₹70,991 34% off Incl. Shipping & all Taxes');expect(captured).toContain('| Memory | 16 GB DDR5-5600MT/s (SODIMM) |');expect(captured).not.toContain('![Image');
+ const f=normalizeDecisiveFacts({entity_match:true,fields:{product_price_inr:{state:'supported',value:70991,evidence_quote:'₹70,991 34% off Incl. Shipping & all Taxes',entity_quote:'Model Number: 21MAS1LH00'},ram_gb:{state:'supported',value:16,evidence_quote:'| Memory | 16 GB DDR5-5600MT/s (SODIMM) |',entity_quote:'Model Number: 21MAS1LH00'}}},'product',captured,['product_price_inr','ram_gb']);expect(f.product_price_inr.value).toBe(70991);expect(f.ram_gb.value).toBe(16);
+});

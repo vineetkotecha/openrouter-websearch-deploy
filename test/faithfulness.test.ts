@@ -61,7 +61,7 @@ it('authenticates configured survivor reads without leaking credentials into res
   let options:any;
   const r=await _xs([{provider:'exa',url:'https://shop.example/item',title:'Laptop',snippet:'Laptop'}],undefined,{fetcher:(async(_url:any,o:any)=>{options=o;return {ok:true,text:async()=> 'Laptop\nPrice: ₹64,999\n16 GB RAM'}}) as any,fields:['product_price_inr','ram_gb']});
   expect(options.headers.Authorization).toBe('Bearer test-secret');
-  expect(options.headers['X-Retain-Images']).toBe('none');
+  expect(options.headers['X-Retain-Images']).toBeUndefined();
   expect(r.results[0]!.fields).toMatchObject({product_price_inr:{value:64999,state:'supported'},ram_gb:{value:16,state:'supported'}});
   expect(JSON.stringify(r)).not.toContain('test-secret');
  }finally{if(old===undefined)delete process.env.JINA_API_KEY;else process.env.JINA_API_KEY=old;}
