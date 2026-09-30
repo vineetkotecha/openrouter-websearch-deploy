@@ -86,3 +86,28 @@ it('keeps motives conditional, consolidates overlapping choice comparisons and a
   expect(p).toContain('Do not ask gender to infer');
  }
 });
+
+it('consolidates model-authored comparisons, covers baseline omissions, and rejects unverifiable group claims',()=>{
+ const i=normalizeIntentFormation({answer_unit:'product',candidate_human_factors:[{key:'social_image_fit',question:'Style in your professional or social settings?',why:'Could affect fit'},{key:'brand_preference',question:'Preferred brand?',why:'Presentation'}]},r);
+ expect(i.candidate_human_factors[0]?.question).toContain('or does that not matter');
+ const b=curateParameters(r,undefined,undefined,i);
+ const raw={parameters:[{key:'search_object',class:'functional',why:'Item',query_reference:'laptop',weight_percent:60,compulsory:false},{key:'design_philosophy',class:'psychological',why:'Presentation',weight_percent:25,compulsory:false,question:'Style in professional settings?'}],decision_groups:[
+  {key:'search_object',members:['search_object'],role:'eligibility',distinct_effect:'Requested object'},
+  {key:'social_image_fit',members:['design_philosophy','social_image_fit','brand_preference'],role:'presentation',distinct_effect:'One desired presentation comparison'},
+  {key:'brand_familiarity',members:['brand_familiarity'],role:'other',distinct_effect:'Separately sourced familiar brand comfort'}]};
+ const m=validateModelParameters(raw,r,i,b,true);
+ expect(m.parameters.filter(p=>p.key==='social_image_fit')).toHaveLength(1);
+ expect(m.parameters.some(p=>p.key==='brand_preference'||p.key==='design_philosophy')).toBe(false);
+ expect(m.parameters.find(p=>p.key==='social_image_fit')?.question).toContain('or does that not matter');
+ expect(m.parameters.find(p=>p.key==='social_image_fit')!.priority/m.parameters.find(p=>p.key==='search_object')!.priority).toBeCloseTo(25/60);
+ expect(m.parameters.reduce((sum,p)=>sum+p.priority,0)).toBeCloseTo(100);
+ expect(()=>validateModelParameters({...raw,decision_groups:undefined},r,i,b,true)).toThrow('decision_groups');
+ expect(()=>validateModelParameters({...raw,decision_groups:raw.decision_groups.slice(0,2)},r,i,b,true)).toThrow('coverage');
+ expect(()=>validateModelParameters({...raw,decision_groups:[...raw.decision_groups,{key:'other',members:['invented'],role:'other',distinct_effect:'Unsupported'}]},r,i,b,true)).toThrow('unknown');
+});
+
+it('merges model price spelling with a sourced numeric ceiling without weakening the veto',()=>{
+ const q=SearchRequestSchema.parse({tenant_id:'t',query:'watch under 100000 INR'}),i=normalizeIntentFormation({answer_unit:'product'},q),b=curateParameters(q,undefined,undefined,i);
+ const m=validateModelParameters({parameters:[{key:'search_object',class:'functional',why:'Object',query_reference:'watch',weight_percent:10,compulsory:false},{key:'price_inr',class:'functional',why:'Budget',query_reference:'under 100000 INR',weight_percent:90,compulsory:false}],decision_groups:[{key:'search_object',members:['search_object'],role:'eligibility',distinct_effect:'Requested item'},{key:'price_max_inr',members:['price_inr','price_max_inr'],role:'eligibility',distinct_effect:'One exact price ceiling'}]},q,i,b,true);
+ expect(m.parameters.filter(p=>p.key.startsWith('price'))).toEqual([expect.objectContaining({key:'price_max_inr',value:100000,hard:true})]);
+});

@@ -1,3 +1,4 @@
+import {decisionGroups,type DecisionGroup} from './decision-groups.js';
 import {physicalProperty} from './parameter-class.js';
 import type { SearchRequest, Mandate, ProviderResult } from "../contracts/search.js";
 import {validatedIntentRequirements,type IntentFormation} from "./intent-formation.js";
@@ -5,7 +6,7 @@ import { canonicalContextKey } from "./context-pull.js";
 import type { CuratedParameterManifest, CuratedParameter } from "./parameter-curation.js";
 
 export type ProposedParameter = {key:string;class:"functional"|"psychological";why:string;weight_percent:number;compulsory:boolean;hard?:boolean;effect?:"eligibility"|"retrieval"|"ranking";question?:string;query_reference?:string};
-export type ModelManifest = CuratedParameterManifest & {generation:"gemini"|"fallback";weight_total_percent:100;fallback_reason?:string};
+export type ModelManifest = CuratedParameterManifest & {generation:"gemini"|"fallback";weight_total_percent:100;fallback_reason?:string;decision_groups?:DecisionGroup[]};
 const keyPattern=/^[a-z][a-z0-9_]{0,63}$/;
 const restricted=/(?:religion|race|ethnic|gender|sexual|disability|health|medical|politic|(?:^|_)age(?:_|$)|income|credit|biometric)/i;
 const usable=(x:unknown)=>x!==undefined&&x!==null&&String(x).trim()!=="";
@@ -13,9 +14,11 @@ const same=(x:unknown,y:unknown)=>JSON.stringify(x)===JSON.stringify(y);
 const uses=(c:SearchRequest["context"][number])=>c.allowed_uses?.length?c.allowed_uses:["search","rerank","ask"] as ("search"|"rerank"|"ask")[];
 /** A model names parameters, never supplies personal values or permission. Explicit constraints and
  * sourced caller facts are re-bound from the request, not accepted from model JSON. */
-export function validateModelParameters(raw:unknown,r:SearchRequest,intent:IntentFormation,baseline:CuratedParameterManifest):ModelManifest {
+export function validateModelParameters(raw:unknown,r:SearchRequest,intent:IntentFormation,baseline:CuratedParameterManifest,requireGroups=false):ModelManifest {
  if(!raw||typeof raw!=="object"||!Array.isArray((raw as any).parameters))throw new Error("Gemini did not return parameters");
  const sourceProposals=(raw as {parameters:unknown[]}).parameters;
+ const groupKeys=[...new Set([...sourceProposals.map((p:any)=>p?.key).filter((k:unknown)=>typeof k==='string'),...baseline.parameters.map(p=>p.key)])];
+ const groups=decisionGroups((raw as any).decision_groups,groupKeys,requireGroups);
  // Model aliases are one factor, not extra weight. Retain the larger proposed
  // weight for an alias group, then normalize the distinct factors together.
  const grouped=new Map<string,unknown>();const originalKeys=new Set<string>();
@@ -84,20 +87,39 @@ export function validateModelParameters(raw:unknown,r:SearchRequest,intent:Inten
  for(const b of baseline.parameters.filter(b=>b.class==='psychological'&&!physicalProperty(b.key)&&!restricted.test(b.key))){
   if(!items.some(p=>p.key===b.key&&p.class===b.class))items.push({...b,priority:b.state==='resolved'?Math.min(10,b.priority):1});
  }
+ // Consolidate after facts have been bound and preserved. Missing aliases may
+ // adopt a group's class; resolved facts of different classes/values cannot merge.
+ for(const g of groups){
+  const members=new Set(g.members.map(canonicalContextKey));const ps=items.filter(p=>members.has(p.key));if(!ps.length)continue;
+  const resolved=ps.filter(p=>p.state==='resolved').sort((a,b)=>Number(b.hard)-Number(a.hard));
+  const hard=resolved.find(p=>p.hard);if(hard&&g.key!==hard.key)throw new Error('decision_groups preserve canonical hard key');
+  if(resolved.length>1&&resolved.some(p=>p.class!==resolved[0]!.class||!same(p.value,resolved[0]!.value)&&!(hard&&p.source==='query'&&p.evidence.some(e=>hard.evidence.some(h=>e.reference&&e.reference===h.reference)))))throw new Error('decision_groups conflict between sourced values');
+  const representative=resolved[0]??ps.find(p=>p.key===g.key)??ps[0]!;
+  const cls=['presentation','meaning','purchase_confidence','routine'].includes(g.role)?'psychological':g.role==='other'?representative.class:'functional';
+  if(resolved.some(p=>p.class!==cls))throw new Error('decision_groups cannot reclassify sourced facts');
+  const merged={...representative,key:g.key,class:cls as 'functional'|'psychological',priority:Math.max(...ps.map(p=>p.priority)),hard:ps.some(p=>p.hard),compulsory:ps.some(p=>p.compulsory),question:ps.find(p=>p.key===g.key)?.question??representative.question};
+  if(cls==='psychological'&&merged.hard)throw new Error('decision_groups cannot make psychological constraint hard');
+  for(let j=items.length-1;j>=0;j--)if(ps.includes(items[j]!))items.splice(j,1);
+  items.push(merged);
+ }
  // User-specified structured constraints cannot be silently dropped by a model.
  for(const k of Object.keys(r.hard_constraints))if(!seen.has(`functional:${canonicalContextKey(k)}`))throw new Error(`omitted hard constraint ${k}`);
  const sum=items.reduce((n,x)=>n+x.priority,0);
  if(sum<=0)throw new Error("parameter weights have no positive total");
  if(Math.abs(sum-100)>.001||discardedUnsafeWeight>0)for(const item of items)item.priority=item.priority/sum*100;
- for(const p of items)if(p.state==="resolved")delete p.question;
- return {...baseline,intent,parameters:items,conflicts:items.filter(p=>p.state==="conflict").map(p=>p.key),criticality_cutoff:70,generation:"gemini",weight_total_percent:100};
+ for(const p of items){
+  if(p.state==='resolved')delete p.question;
+  else if(p.key==='social_image_fit'&&!/\b(workplace|office|professional setting|social setting|study environment)\b/i.test(r.query)&&p.question&&/\b(professional|social|work|study)\s+(?:or\s+\w+\s+)?(?:settings?|environment)/i.test(p.question))p.question='Is there a visual style or impression you would like, or does that not matter to you?';
+ }
+
+ return {...baseline,intent,parameters:items,conflicts:items.filter(p=>p.state==="conflict").map(p=>p.key),criticality_cutoff:70,generation:"gemini",weight_total_percent:100,decision_groups:groups};
 }
-export function fallbackManifest(baseline:CuratedParameterManifest):ModelManifest {
+export function fallbackManifest(baseline:CuratedParameterManifest,requireGroups=false):ModelManifest {
  const ps=baseline.parameters.map(p=>({...p,class:p.class==="psychological"&&physicalProperty(p.key)?"functional" as const:p.class}));
  const importance=ps.map(p=>p.hard?3:p.compulsory?2:1);const sum=importance.reduce((a,b)=>a+b,0)||1;
  return {...baseline,generation:"fallback",weight_total_percent:100,parameters:ps.map((p,i)=>({...p,priority:importance[i]! / sum*100}))};
 }
-export function parameterPrompt(r:SearchRequest,intent:IntentFormation){return `We have clarified what a person's search request means. Your job is to curate the factors that make this enhanced query useful for web search and comparison: the thing sought, requirements, small factual details and possible choice preferences. The next step will obtain genuinely missing values from permitted caller context or the person, then write the final search guide. Design the factors, not personal answers.
+export function parameterPrompt(r:SearchRequest,intent:IntentFormation,baseline?:CuratedParameterManifest){return `We have clarified what a person's search request means. Your job is to curate the factors that make this enhanced query useful for web search and comparison: the thing sought, requirements, small factual details and possible choice preferences. The next step will obtain genuinely missing values from permitted caller context or the person, then write the final search guide. Design the factors, not personal answers.
 
 You have the original query, its enhanced searchable interpretation in intent.enhanced_query, the decision and missing-context interpretation in intent, hard constraints and metadata about known context keys. Metadata tells you a fact may exist, not its value.
 
@@ -113,13 +135,14 @@ For product fit, ask about the actual fit requirement rather than a binary gende
 For each parameter's why, give a brief decision-impact justification tied to this query, including why its relative weight is large or small. Return concise justifications, not private reasoning. After allocation, check whether the combined weights reflect the decision's main purpose rather than the number of fields in each class. Assign weights totaling 100 percent across all parameters; the validator will normalize a valid positive total, but do not invent factors to fill weight.
 Use only the supplied evidence. Do not infer personal traits or sensitive attributes. Work through the checks internally; do not return private reasoning.
 
+Return decision_groups: model-authored equivalence groups with a canonical key, exact member keys, one decision role and a concise independent ranking/filter effect. Cover every proposed key and every prior baseline key supplied in grouping_keys exactly once. Group synonymous price ceiling fields together. Group visual style, image, design philosophy, recognition and brand preference when they seek the same presentation answer; do not add multiple presentation groups. A separate brand affinity is allowed only when its independent answer/effect is truly different, with role other and explicit distinction. Keep physical materials, dimensions and mechanism separate when independently checkable. Keep personal meaning, seller assurance and daily routine separate from presentation. Each group uses the largest member weight, not their sum, then all weights normalize to100. This prevents an alias receiving more weight merely because it has more names. Never merge different sourced values or override a hard constraint. Choose stable canonical keys social_image_fit, buying_comfort and usage_pattern for their respective roles.
 Return one JSON object only, without markdown, commentary or extra fields.
 
 Return this structure:
-{"parameters":[{"key":"snake_case","class":"functional|psychological","why":"why this search needs the factor","weight_percent":0,"compulsory":false,"hard":false,"effect":"eligibility|retrieval|ranking","question":"natural question if missing","query_reference":"exact query phrase, or omit"}]}
+{"decision_groups":[{"key":"canonical_key","members":["exact_input_or_proposed_key"],"role":"eligibility|capability|physical_fit|presentation|meaning|purchase_confidence|routine|other","distinct_effect":"independent decision effect"}],"parameters":[{"key":"snake_case","class":"functional|psychological","why":"why this search needs the factor","weight_percent":0,"compulsory":false,"hard":false,"effect":"eligibility|retrieval|ranking","question":"natural question if missing","query_reference":"exact query phrase, or omit"}]}
 
 Input JSON:
-${JSON.stringify({query:r.query,intent,hard_constraints:r.hard_constraints,known_keys:r.context.map(c=>({key:c.key,class:c.class,source:c.source,confidence:c.confidence}))})}`}
+${JSON.stringify({query:r.query,intent,grouping_keys:baseline?.parameters.map(p=>({key:p.key,class:p.class,state:p.state})),hard_constraints:r.hard_constraints,known_keys:r.context.map(c=>({key:c.key,class:c.class,source:c.source,confidence:c.confidence}))})}`}
 function safeQuestion(p:CuratedParameter,proposed?:string){const q=proposed||`What should I know about ${p.key.replace(/_/g," ")}?`;return p.class==="psychological"&&/\b(status|social validation|look up to|admire me|impress people)\b/i.test(q)?"Is there an example of what feels right to you?":q}
 export function normalizeQuestions(raw:unknown,manifest:ModelManifest):string[] {
  const missing=manifest.parameters.filter(p=>p.compulsory&&p.state!=="resolved"&&p.allowed_uses.includes("ask"));

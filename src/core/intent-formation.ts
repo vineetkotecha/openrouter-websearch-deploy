@@ -51,7 +51,12 @@ export function normalizeIntentFormation(raw:unknown,r:SearchRequest):IntentForm
  const familyNames=['social_image_fit','buying_comfort','usage_pattern'];
  const considerations=Array.isArray(x.human_factor_considerations)?x.human_factor_considerations.filter(v=>familyNames.includes(v?.family)&&typeof v.relevant==='boolean'&&clean(v.why)).map(v=>({family:v.family as string,relevant:v.relevant as boolean,why:clean(v.why),question:clean(v.question)})):[];
  for(const c of considerations.filter(c=>c.relevant&&c.question))if(!proposedHumanFactors.some(p=>p.key===c.family))proposedHumanFactors.push({key:c.family,question:c.question,why:c.why});
- const candidate_human_factors=proposedHumanFactors.filter(h=>!physicalProperty(h.key));
+ const candidate_human_factors=proposedHumanFactors.filter(h=>!physicalProperty(h.key)).map(h=>{
+  // Separate from equivalence: unsupported settings are never prerequisites to
+  // asking about visual fit. Keep the question optional and environment-neutral.
+  if(h.key==='social_image_fit'&&!/\b(workplace|office|professional setting|social setting|study environment)\b/i.test(r.query)&&/\b(professional|social|work|study)\s+(?:or\s+\w+\s+)?(?:settings?|environment)/i.test(h.question))return {...h,question:'Is there a visual style or impression you would like, or does that not matter to you?'};
+  return h;
+ });
  for(const h of proposedHumanFactors.filter(h=>physicalProperty(h.key)))if(!unknowns.some(x=>x.key===h.key))unknowns.push({...h,result_changing:false});
  return {version:1,decision:clean(x.decision)||r.query,enhanced_query:clean(x.enhanced_query,400)||r.query,answer_unit:selected?.unit,human_factor_considerations:considerations.map(({question,...c})=>c),required_context,answer_forms,intent_space:conflict?[{category:unit!.unit,why:"Query recognition"},{category:modelUnit!,why:"Model interpretation"}]:categories.length?categories:base.intent_space,category_state,strategy,unknowns,candidate_human_factors,search_branches:branches,evidence:[{source:"query",reference:"query"}]};
 }
