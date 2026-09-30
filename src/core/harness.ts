@@ -1,3 +1,4 @@
+import {applyDecisionNarrative} from './decision-answer.js';
 import type {DecisiveFact} from './fact-schema.js';
 import {verifyOptionLinks} from './option-links.js';
 import {buildFinalAnswer} from './answer.js';
@@ -309,7 +310,7 @@ export class SearchHarness {
     };
     const linksChecked=await verifyOptionLinks(extracted,Math.min(3,plan.budget.max_extracts),this.opts.fetcher);
     const linkChecks=new Map(linksChecked.map(x=>[candidateKey(x),(x.raw as any)?.option_link_check]));
-    response.answer=buildFinalAnswer(effective,response.results,audit,limitations,linkChecks,intent.intended_action);record('11_answer_synthesis',response.answer);
+    response.answer=buildFinalAnswer(effective,response.results,audit,limitations,linkChecks,intent.intended_action);if(this.writer.synthesize&&response.answer.options.length){try{const keys=new Set(response.answer.options.map(o=>o.candidate_key));const narratives=await this.writer.synthesize(effective,finalMandate,response.results.filter(x=>keys.has(candidateKey(x))),intent.intended_action);response.answer=applyDecisionNarrative(response.answer,narratives);}catch{response.answer.limitations.push('Decision explanation unavailable; source facts and missing checks are shown instead.');}}record('11_answer_synthesis',response.answer);
     response.trace=nineStageTrace(traceEvents,response.status);
     record('11_response',{status:response.status,episode_id:response.episode_id,result_count:response.results.length});
     // Storage must never fail a search: record the failure and still return results.

@@ -6,7 +6,10 @@ export function decisionGroups(raw:unknown,keys:string[],required=false,requireE
  if(raw===undefined&&!required)return [];
  if(!Array.isArray(raw)||!raw.length)throw new Error('decision_groups required');
  const seen=new Set<string>(),ids=new Set<string>();const roles=['eligibility','capability','physical_fit','presentation','meaning','purchase_confidence','routine','other'];
- const groups:DecisionGroup[]=raw.map((x:any)=>{
+ // An invalid multi-member independence declaration is safely expanded, never
+ // merged. The independent meaning review must then decide real equivalence.
+ const shaped=contextual?raw.flatMap((x:any)=>Array.isArray(x?.members)&&x.members.length>1&&Array.isArray(x.member_effects)&&x.member_effects.some((e:any)=>e.independent)?x.members.map((key:string)=>({...x,key,members:[key],member_effects:x.member_effects.filter((e:any)=>e.key===key)})):[x]):raw;
+ const groups:DecisionGroup[]=shaped.map((x:any)=>{
   if(!x||typeof x.key!=='string'||!/^[a-z][a-z0-9_]{0,63}$/.test(x.key)||!roles.includes(x.role)||typeof x.distinct_effect!=='string'||!x.distinct_effect.trim()||!Array.isArray(x.members)||!x.members.length)throw new Error('invalid decision_groups shape');
   let key=contextual?x.key:canonicalContextKey(x.key);
   const members=x.members.map((m:unknown)=>{if(typeof m!=='string'||!keys.includes(m))throw new Error('unknown decision_groups member');if(seen.has(m))throw new Error('duplicate decision_groups member');seen.add(m);return m;});
@@ -19,12 +22,12 @@ export function decisionGroups(raw:unknown,keys:string[],required=false,requireE
     if(e.effect_class!==undefined&&!['functional','psychological'].includes(e.effect_class))throw new Error('decision_groups invalid effect class');
     checked.add(e.key);return {key:e.key,effect_class:e.effect_class,answer_sought:e.answer_sought.slice(0,300),consequence:e.consequence.slice(0,500),independent:e.independent,why:e.why.slice(0,500)};
    });
-   if(members.length>1&&member_effects?.some(e=>e.independent))throw new Error('decision_groups preserve independent consequence in its own slot');
+   if(members.length>1&&member_effects?.some(e=>e.independent))throw new Error(`decision_groups preserve independent consequence in its own slot (${members.join(',')})`);
   }
   const independent=member_effects?.some(e=>e.independent)??false;
   if(independent){
    if(contextual&&members.length===1)key=members[0];
-   if(key!==(contextual?members[0]:canonicalContextKey(members[0])))throw new Error('decision_groups preserve independent consequence in its own slot');
+   if(key!==(contextual?members[0]:canonicalContextKey(members[0])))throw new Error(`decision_groups preserve independent consequence in its own slot (${members.join(',')})`);
   }else if(!contextual){
    const family=({presentation:'social_image_fit',purchase_confidence:'buying_comfort',routine:'usage_pattern'} as Record<string,string>)[x.role];
    if(family)key=family;
