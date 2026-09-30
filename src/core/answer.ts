@@ -3,7 +3,7 @@ import type {SearchRequest,SearchResponse} from '../contracts/search.js';
 import type {AuditVerdict} from './architecture.js';
 import {candidateKey} from './entities.js';
 type Ranked=SearchResponse['results'][number];
-export type FinalAnswer={status:'supported_options'|'provisional_options'|'insufficient_evidence';summary:string;options:{candidate_key:string;name:string;experience?:string[];tradeoffs?:string[];decision_evidence?:import('./decision-answer.js').DecisionClaim[];why:string[];catch:string[];evidence_state:'supported'|'not_checked';links:{url:string;label:string;kind:'specific_option'|'source_info'|'booking';verified_destination:boolean;dates_verified:boolean}[]}[];limitations:string[]};
+export type FinalAnswer={status:'supported_options'|'provisional_options'|'insufficient_evidence';summary:string;options:{candidate_key:string;name:string;why:string[];catch:string[];evidence_state:'supported'|'not_checked';links:{url:string;label:string;kind:'specific_option'|'source_info'|'booking';verified_destination:boolean;dates_verified:boolean}[]}[];limitations:string[]};
 const root=(url:string)=>{try{const u=new URL(url);return /^\/?$|^\/(?:en|in|en-in|in\/en)\/?$|\/(?:index|home)\.(?:html|php)$/.test(u.pathname)}catch{return true}};
 export function buildFinalAnswer(r:SearchRequest,results:Ranked[],audits:AuditVerdict[],limitations:string[],linkChecks:Map<string,any>=new Map(),action?:IntendedAction):FinalAnswer{
  const options=results.slice(0,action?.kind==='prepare_booking'?1:action?.kind==='choose'?4:5).map(x=>{
