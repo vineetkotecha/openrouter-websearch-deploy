@@ -50,3 +50,14 @@ it('canonicalizes model-renamed decision families without duplicate slots or wei
  expect(m.parameters.find(p=>p.key==='usage_pattern')?.value).toBeUndefined();
  expect(m.parameters.reduce((sum,p)=>sum+p.priority,0)).toBeCloseTo(100);
 });
+
+it('classifies observed gaming, ports and noise keys as functional and merges noise tolerance aliases',()=>{
+ const i=normalizeIntentFormation({answer_unit:'product',candidate_human_factors:[{key:'gaming_capability',question:'Gaming bonus?',why:'GPU workload'},{key:'ports_needed',question:'Which ports?',why:'Connectivity'},{key:'noise_level',question:'Quiet under load?',why:'Acoustic output'}]},r);
+ expect(i.candidate_human_factors).toEqual([]);
+ const b=curateParameters(r,undefined,undefined,i);
+ const proposal=(key:string,weight:number)=>({key,class:'psychological',why:'Hardware requirement',weight_percent:weight,compulsory:false});
+ const m=validateModelParameters({parameters:[{key:'search_object',class:'functional',why:'Item sought',query_reference:'laptop',weight_percent:70,compulsory:false},proposal('gaming_capability',10),proposal('ports_needed',10),proposal('noise_level',5),proposal('noise_level_tolerance',10)]},r,i,b);
+ for(const key of ['gaming_capability','ports_needed','noise_level'])expect(m.parameters.filter(p=>p.key===key)).toEqual([expect.objectContaining({class:'functional',state:'missing'})]);
+ expect(m.parameters.some(p=>p.key==='noise_level_tolerance')).toBe(false);
+ expect(m.parameters.reduce((sum,p)=>sum+p.priority,0)).toBeCloseTo(100);
+});
