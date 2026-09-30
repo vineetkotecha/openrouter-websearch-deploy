@@ -73,3 +73,16 @@ it('asks for query-specific decision impact without a psychological quota and ma
  expect(p).toContain('not category stereotypes');
  expect(mandatePrompt('{}')).toContain('Preserve those validated weights exactly');
 });
+
+it('keeps motives conditional, consolidates overlapping choice comparisons and asks direct fit rather than gender',async()=>{
+ const {parameterPrompt}=await import('../src/core/architecture.js');
+ const {intentFormationPrompt}=await import('../src/core/intent-formation.js');
+ for(const p of [parameterPrompt(r,intent),intentFormationPrompt(r)]){
+  expect(p).toContain('Treat every unconfirmed motive as a conditional possibility');
+  expect(p).toContain('does not establish a desire for status');
+  expect(p).toContain('group overlapping choice questions by the underlying answer');
+  expect(p).toContain('independent ranking effect');
+  expect(p).toContain('optional wrist size, preferred case dimensions');
+  expect(p).toContain('Do not ask gender to infer');
+ }
+});
