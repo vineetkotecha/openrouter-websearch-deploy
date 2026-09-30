@@ -1,3 +1,4 @@
+import {collectionSource} from './entities.js';
 import type {Mandate,ProviderResult,SearchRequest} from '../contracts/search.js';
 import {answerStrategy,type AnswerUnit} from './answer-units.js';
 
@@ -23,13 +24,14 @@ function explicitBudget(r:SearchRequest){const structured=Object.entries(r.hard_
 export function eligibility(r:SearchRequest,m:Mandate,x:ProviderResult,answerUnit?:AnswerUnit):Eligibility{
  const reasons:string[]=[],verification:Record<string,Verification>={},strategy=answerUnit?{unit:answerUnit,requiresNamedEntity:answerUnit!=="flight_itinerary"&&answerUnit!=="research_source"}:answerStrategy(r);
  let url:URL;try{url=new URL(x.url)}catch{return{eligible:false,reasons:['invalid URL'],verification}};
- if(strategy?.requiresNamedEntity){
+ if(strategy?.requiresNamedEntity&&!x.entity){
   const title=x.title.replace(/\s*[-|:].*$/,'').trim();
   if(socialOrEditorial.test(url.hostname))reasons.push('social or discussion page, not a direct answer listing');
   if(strategy.unit==='hotel_property'){
    if(listingPath.test(url.pathname)||collectionTitle.test(title)&&!/^\s*(?:fabhotel|treebo|oyo|collection o|olive zip|xotel)\b/i.test(title))reasons.push('collection page, not an individual hotel');
    if(!hotelName.test(title)||/^(?:this|the|a|our)\s+hotel\b|\bthis hotel\b/i.test(title)||/^[+\d\s()\-]{8,}/.test(title))reasons.push('no named hotel property in result title');
   }else if(strategy.unit==='local_business'){
+   if(collectionSource(x))reasons.push('collection page, not an individual place');
    // Search/discovery apps are not the restaurant, cafe or venue the person can visit.
    if(/\b(?:find|discover|search|choose|pick|recommend|curat\w*|match|decide)\b/i.test(x.snippet.slice(0,700)) &&
       /\b(?:restaurants?|places?|spots?|date)\b/i.test(x.snippet.slice(0,700)) &&
@@ -40,6 +42,7 @@ export function eligibility(r:SearchRequest,m:Mandate,x:ProviderResult,answerUni
   }else if(listingPath.test(url.pathname)||collectionTitle.test(title))reasons.push('collection page, not an individual answer');
   verification[strategy.unit]={status:'unverified',...(reasons.length?{}:{evidence:`entity-shaped title: ${x.title}`})};
  }
+ if(x.entity)verification[strategy?.unit??'entity']={status:'verified',evidence:`Named in source: ${x.entity.name}. This does not verify all requirements.`};
  // Only source-supported, typed fields can exclude an item. Snippet numbers and
  // model assertions never become verified prices, ratings, inventory or dates.
  const cap=explicitBudget(r),price=supportedField(x,/^(?:dated_offer_total_inr|stay_total_inr|product_price_inr|price_for_two_inr|price_inr)$/);

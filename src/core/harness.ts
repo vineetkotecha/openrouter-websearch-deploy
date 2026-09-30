@@ -1,3 +1,4 @@
+import {candidateKey,collectionSource} from './entities.js';
 import {gradeProvider,providerVertical,summarizeCapabilities,matchCapability,type CapabilityObservation} from '../learning/provider-capabilities.js';
 import {BENCHMARK_SEED} from '../learning/provider-seed.js';
 import {namedProductQuery} from "./product-repair.js";
@@ -205,7 +206,7 @@ export class SearchHarness {
     // One bounded repair is attempted only when the first retrieval is empty or
     // every candidate visibly fails the model check, and remaining provider budget allows it.
     const firstGate=gateResults(effective,finalMandate,pool,intent.answer_unit);
-    const noViableCandidates=pool.length>0&&(firstGate.retained.length===0||(audit.length>0&&firstGate.retained.every(x=>audit.some(v=>v.url===x.result.url&&v.state==="fail"&&v.evidence_state==="contradicted"))));
+    const noViableCandidates=pool.length>0&&(firstGate.retained.length===0||(audit.length>0&&firstGate.retained.every(x=>audit.some(v=>(v.candidate_key??v.url)===candidateKey(x.result)&&v.state==="fail"&&v.evidence_state==="contradicted"))));
     if((!pool.length||noViableCandidates)&&exec.runs.length<request.limits.max_provider_calls){
       const failedProviders=new Set(exec.runs.map(x=>x.provider));
       const modelQuery=intent.answer_unit==="product"?namedProductQuery(pool,finalQuery):undefined;
@@ -221,7 +222,7 @@ export class SearchHarness {
     // records. Eligibility determines what can be returned, not what is scored.
     // Staged gate: triage on snippets first, then extract only the survivors.
     const earlyGate=gateResults(effective,finalMandate,pool,intent.answer_unit);
-    const eligiblePool=earlyGate.retained.map(x=>x.result);
+    const eligiblePool=[...earlyGate.retained.map(x=>x.result),...pool.filter(x=>earlyGate.excluded.some(e=>e.url===x.url)&&collectionSource(x))];
     const triaged = rank(finalMandate, eligiblePool, Math.max(request.limits.max_results * 2, 10));
     const byCanon = new Map<string, ProviderResult>();
     for (const x of eligiblePool) { if (!byCanon.has(x.url)) byCanon.set(x.url, x); }
@@ -229,8 +230,9 @@ export class SearchHarness {
     const known_first = [...ordered.filter(x => x.provider === "known_url"), ...ordered.filter(x => x.provider !== "known_url")];
     record('7_triage_and_dedupe',{pool_count:pool.length,eligibility:{retained:earlyGate.retained.length,excluded:earlyGate.excluded},audit,triaged:triaged.map(x=>({rank:x.rank,url:x.url,title:x.title,mandate_fit:x.mandate_fit,faithfulness:x.faithfulness})),ordered_urls:known_first.map(x=>x.url)});
     if(intent.answer_unit==="product")known_first.sort((a,b)=>Number(/\/(?:dp|product|p)\//i.test(b.url))-Number(/\/(?:dp|product|p)\//i.test(a.url)));
-    const { results: extracted, report } = await extractSurvivors(known_first, undefined, { max: Math.max(plan.budget.max_extracts, known.length ? Math.min(known.length, 5) : 0), maxChars: plan.budget.max_extract_chars, tokenBudget: plan.budget.token_budget, fetcher: this.opts.fetcher, judge: this.opts.judge, vertical:intent.answer_unit==='product'||intent.answer_unit==='local_business'?intent.answer_unit:undefined, factReader:this.writer.readFacts?.bind(this.writer), fields: intent.answer_unit==="product"?[...new Set([...plan.classification.structured_fields,"product_price_inr","ram_gb"])]:plan.classification.structured_fields});
-    const rest = eligiblePool.filter(x => !known_first.includes(x));
+    const { results: extracted, report } = await extractSurvivors(known_first, undefined, { max: Math.max(plan.budget.max_extracts, known.length ? Math.min(known.length, 5) : 0), maxChars: plan.budget.max_extract_chars, tokenBudget: plan.budget.token_budget, fetcher: this.opts.fetcher, judge: this.opts.judge, vertical:intent.answer_unit==='product'||intent.answer_unit==='local_business'||intent.answer_unit==='travel_destination'?intent.answer_unit:undefined, factReader:this.writer.readFacts?.bind(this.writer), fields: intent.answer_unit==="product"?[...new Set([...plan.classification.structured_fields,"product_price_inr","ram_gb"])]:plan.classification.structured_fields});
+    if(report.entities)pool=[...pool.filter(x=>!extracted.some(e=>e.entity?.source_url===x.url)),...extracted.filter(x=>x.entity)];
+    const rest = eligiblePool.filter(x => !known_first.includes(x)&&!extracted.some(e=>e.entity?.source_url===x.url));
     record('8_extraction',{report,extracted:extracted.map(x=>({provider:x.provider,url:x.url,title:x.title,fields:x.fields})),untriaged_count:rest.length});
 
     if(branchQueries.length){
@@ -259,30 +261,30 @@ export class SearchHarness {
     if(/\b(?:latest|open now|today|current)\b/i.test(request.query))limitations.push('Freshness, current hours or publication date were not independently verified.');
     // Audit the full pool again with extracted source evidence, not only snippets.
     // Keep records that failed early triage in the audit; they cannot be promoted by it.
-    const extractedByUrl=new Map(extracted.map(x=>[x.url,x]));
-    const auditInputs=pool.map(x=>extractedByUrl.get(x.url)??x);
+    const extractedByUrl=new Map(extracted.map(x=>[candidateKey(x),x]));
+    const auditInputs=pool.map(x=>extractedByUrl.get(candidateKey(x))??x);
     const sourceAudit=extractedByUrl.size?await runAudit(auditInputs):[];
     if(sourceAudit.length)audit=reconcileAudits(audit,sourceAudit);
     const firstJob = plan.jobs[0];
     const lateGate=gateResults(effective,finalMandate,[...extracted, ...rest],intent.answer_unit);
-    const verification=new Map(lateGate.retained.map(x=>[x.result.url,x.verification]));
+    const verification=new Map(lateGate.retained.map(x=>[candidateKey(x.result),x.verification]));
     // The audit sees the complete retrieved pool, not a preselected top-eight shortlist.
-    const veto=new Set(audit.filter(x=>x.state==="fail").map(x=>x.url));
+    const veto=new Set(audit.filter(x=>x.state==="fail").map(x=>x.candidate_key??x.url));
     const uncertain=audit.filter(x=>x.state==="uncertain").length;
     if(uncertain)limitations.push(`${uncertain} source candidates had uncertain Gemini verdicts; they were not treated as verified.`);
-    const rankedAll=[...new Map([...extracted,...rest,...pool.filter(x=>earlyGate.excluded.some(e=>e.url===x.url))].map(x=>[x.url,x])).values()].flatMap(x=>rank(finalMandate,[x],1));
-    const allowed=new Set(lateGate.retained.map(x=>x.result.url).filter(url=>!veto.has(url)));
-    const initialRank=rankedAll.map(x=>allowed.has(x.url)?x:{...x,faithfulness:{state:"unverified" as const,score:x.faithfulness.score}});
+    const rankedAll=[...new Map([...extracted,...rest,...pool.filter(x=>earlyGate.excluded.some(e=>e.url===x.url)&&!extracted.some(e=>e.entity?.source_url===x.url))].map(x=>[candidateKey(x),x])).values()].flatMap(x=>rank(finalMandate,[x],1));
+    const allowed=new Set(lateGate.retained.map(x=>candidateKey(x.result)).filter(url=>!veto.has(url)));
+    const initialRank=rankedAll.map(x=>allowed.has(candidateKey(x))?x:{...x,faithfulness:{state:"unverified" as const,score:x.faithfulness.score}});
     record('9_initial_rank',initialRank);
-    const eligibleForJev=initialRank.filter(x=>allowed.has(x.url));
+    const eligibleForJev=initialRank.filter(x=>allowed.has(candidateKey(x)));
     const reranked=await jevRerank(effective,finalMandate,eligibleForJev);
     if(reranked.reason!=="reranked")limitations.push(`Jev rerank not completed: ${reranked.reason}.`);
     record('10_jev_rerank',reranked);
-    const providerFeedback=observedRuns.map(run=>gradeProvider({provider:run.provider,query_class:run.job.query_class,answer_unit:intent.answer_unit,kind:run.job.kind,vertical:providerVertical(run.provider,{...effective,query:run.job.query??finalQuery},finalMandate,run.job.search_vertical),status:run.status,latency_ms:run.latency_ms,results:run.results.map(x=>extractedByUrl.get(x.url)??x),request:effective,mandate:finalMandate,fields:intent.answer_unit==='product'?['product_price_inr','ram_gb']:plan.classification.structured_fields}));
+    const providerFeedback=observedRuns.map(run=>gradeProvider({provider:run.provider,query_class:run.job.query_class,answer_unit:intent.answer_unit,kind:run.job.kind,vertical:providerVertical(run.provider,{...effective,query:run.job.query??finalQuery},finalMandate,run.job.search_vertical),status:run.status,latency_ms:run.latency_ms,results:run.results.map(x=>extractedByUrl.get(candidateKey(x))??x),request:effective,mandate:finalMandate,fields:intent.answer_unit==='product'?['product_price_inr','ram_gb']:intent.answer_unit==='local_business'?['price_for_two_inr','location']:plan.classification.structured_fields}));
     record('6_provider_feedback',{version:1,runs:providerFeedback,grade:'retrieval proxy; not user outcome',persistence:request.permissions.may_retain&&request.permissions.may_learn?'tenant-local episode':'not persisted for learning'});
     const response: SearchResponse = {
       status: "complete", episode_id,
-      results: reranked.results.filter(x=>allowed.has(x.url)).slice(0,5).map(x=>({...x,verification:verification.get(x.url)??{},citations:[{url:x.url,claim:x.title,support:x.faithfulness.state,kind:"source_claim" as const}]})),
+      results: reranked.results.filter(x=>allowed.has(candidateKey(x))).slice(0,5).map(x=>({...x,verification:verification.get(candidateKey(x))??{},citations:[{url:x.url,claim:x.title,support:x.faithfulness.state,kind:"source_claim" as const}]})),
       route: [...exec.runs,...repairRuns].map(x => ({ provider: x.provider, latency_ms: x.latency_ms, status: x.status, result_count: x.result_count })),
       limitations,
       route_decision: {

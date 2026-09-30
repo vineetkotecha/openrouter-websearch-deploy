@@ -1,3 +1,4 @@
+import {candidateKey} from './entities.js';
 import {decisionGroups,type DecisionGroup} from './decision-groups.js';
 import {physicalProperty} from './parameter-class.js';
 import type { SearchRequest, Mandate, ProviderResult } from "../contracts/search.js";
@@ -192,18 +193,18 @@ Return this structure:
 
 Input JSON:
 ${JSON.stringify({query:r.query,known:r.context.filter(c=>c.value!=null).map(c=>({key:c.key,source:c.source})),missing:m.parameters.filter(p=>p.compulsory&&p.state!=="resolved").map(p=>({key:p.key,class:p.class,why:p.question,effect:p.effect,weight_percent:p.priority}))})}`}
-export type AuditVerdict={url:string;state:"pass"|"fail"|"uncertain";reason:string;evidence_quote?:string;evidence_state?:"supported"|"contradicted"|"not_checked"};
+export type AuditVerdict={url:string;candidate_key?:string;state:"pass"|"fail"|"uncertain";reason:string;evidence_quote?:string;evidence_state?:"supported"|"contradicted"|"not_checked"};
 export function normalizeAudit(raw:unknown,items:ProviderResult[],now=new Date()):AuditVerdict[]{
  const list=raw&&typeof raw==="object"?(raw as any).verdicts:undefined;
  if(!Array.isArray(list))throw new Error("audit verdicts missing");
  const byUrl=new Map<string,AuditVerdict>();
  for(const item of list){
   if(!item||typeof item.url!=="string"||!["pass","fail","uncertain"].includes(item.state)||typeof item.reason!=="string")continue;
-  if(items.some(x=>x.url===item.url))byUrl.set(item.url,{url:item.url,state:item.state,reason:item.reason.slice(0,300),evidence_quote:typeof item.evidence_quote==="string"?item.evidence_quote.slice(0,250):undefined,evidence_state:item.evidence_state});
+  const match=items.find(x=>candidateKey(x)===(item.candidate_key??item.url));if(match)byUrl.set(candidateKey(match),{url:item.url,candidate_key:candidateKey(match),state:item.state,reason:item.reason.slice(0,300),evidence_quote:typeof item.evidence_quote==="string"?item.evidence_quote.slice(0,250):undefined,evidence_state:item.evidence_state});
  }
- if(items.some(x=>!byUrl.has(x.url)))throw new Error("audit coverage incomplete");
+ if(items.some(x=>!byUrl.has(candidateKey(x))))throw new Error("audit coverage incomplete");
  return items.map(x=>{
-  const v=byUrl.get(x.url)!,quote=v.evidence_quote?.trim();
+  const v=byUrl.get(candidateKey(x))!,quote=v.evidence_quote?.trim();
   const evidence=[x.title,x.snippet,(x.raw as any)?.passage,...Object.values(x.fields??{}).flatMap((f:any)=>f?.state==='supported'&&f.evidence?[f.evidence]:[])].filter(y=>typeof y==="string").join(" ");
   const unknown=(reason:string):AuditVerdict=>({...v,state:'uncertain',evidence_state:'not_checked',reason,evidence_quote:undefined});
   if(quote&&!evidence.includes(quote))return unknown("Audit excerpt was not present in the supplied source; verify before treating the verdict as decisive.");
@@ -223,8 +224,8 @@ export function normalizeAudit(raw:unknown,items:ProviderResult[],now=new Date()
 }
 // Only grounded contradictions persist. Not-checked candidates can become proven after a page read.
 export function reconcileAudits(initial:AuditVerdict[],after:AuditVerdict[]):AuditVerdict[]{
- const previous=new Map(initial.map(v=>[v.url,v]));
- return after.map(v=>{const old=previous.get(v.url);return old?.state==='fail'&&old.evidence_state==='contradicted'?old:v;});
+ const previous=new Map(initial.map(v=>[v.candidate_key??v.url,v]));
+ return after.map(v=>{const old=previous.get(v.candidate_key??v.url);return old?.state==='fail'&&old.evidence_state==='contradicted'?old:v;});
 }
 export function auditPrompt(r:SearchRequest,m:Mandate,items:ProviderResult[],now=new Date(),intent?:IntentFormation){return `Web search has returned candidates for an enhanced request. Check each against the person's original request and supplied source evidence. Your verdict helps keep wrong answers out before source extraction and final comparison; it does not create new facts.
 
@@ -240,7 +241,7 @@ Use only the supplied evidence. Do not infer personal traits or sensitive attrib
 Return one JSON object only, without markdown, commentary or extra fields.
 
 Return this structure:
-{"verdicts":[{"url":"exact input URL","state":"pass|fail|uncertain","evidence_state":"supported|contradicted|not_checked","reason":"brief source-grounded reason","evidence_quote":"exact short source substring or empty"}]} (one verdict per input candidate)
+{"verdicts":[{"candidate_key":"exact input candidate_key","url":"exact input URL","state":"pass|fail|uncertain","evidence_state":"supported|contradicted|not_checked","reason":"brief source-grounded reason","evidence_quote":"exact short source substring or empty"}]} (one verdict per input candidate, echo candidate_key exactly)
 
 Input JSON:
-${JSON.stringify({query:r.query,intent:m.intent,answer_unit:intent?.answer_unit,required_context:intent?.required_context,hard_constraints:r.hard_constraints,candidates:items.map(x=>({url:x.url,title:x.title,snippet:x.snippet.slice(0,500),fields:x.fields,source_passage:(x.raw as any)?.passage?.slice(0,1200)}))})}`}
+${JSON.stringify({query:r.query,intent:m.intent,answer_unit:intent?.answer_unit,required_context:intent?.required_context,hard_constraints:r.hard_constraints,candidates:items.map(x=>({candidate_key:candidateKey(x),entity:x.entity,url:x.url,title:x.title,snippet:x.snippet.slice(0,500),fields:x.fields,source_passage:(x.raw as any)?.passage?.slice(0,1200)}))})}`}

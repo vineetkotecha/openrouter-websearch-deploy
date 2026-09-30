@@ -1,7 +1,8 @@
 import type {SearchRequest} from '../contracts/search.js';
-export type AnswerUnit='hotel_property'|'flight_itinerary'|'product'|'local_business'|'person'|'research_source';
+export type AnswerUnit='hotel_property'|'flight_itinerary'|'product'|'local_business'|'person'|'research_source'|'travel_destination';
 export type Strategy={unit:AnswerUnit; dimensions:readonly string[]; terms:readonly string[]; requiresNamedEntity:boolean};
 const patterns:{strategy:Strategy;match:RegExp}[]=[
+ {strategy:{unit:'travel_destination',dimensions:['origin','travel_date','duration','experiences'],terms:['travel destination'],requiresNamedEntity:true},match:/\b(?:travel destinations?|destination for|place to go|places to visit|where to travel|where to go)\b/i},
  {strategy:{unit:'hotel_property',dimensions:['property','location','stay_date','filters'],terms:['hotel property','rooms rates reviews'],requiresNamedEntity:true},match:/\b(?:hotels?|stays?|lodg(?:ing|es?)|rooms?)\b/i},
  {strategy:{unit:'flight_itinerary',dimensions:['origin','destination','departure_date','passengers','filters'],terms:['flight itinerary'],requiresNamedEntity:false},match:/\b(?:flights?|airfare|airline tickets?)\b/i},
  {strategy:{unit:'product',dimensions:['item','compatibility','market','price','filters'],terms:['product'],requiresNamedEntity:true},match:/\b(?:laptops?|phones?|shoes?|chargers?|headphones?|earbuds?|jackets?|toys?)\b/i},
