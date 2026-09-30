@@ -70,7 +70,7 @@ export function validateModelParameters(raw:unknown,r:SearchRequest,intent:Inten
  return {...baseline,intent,parameters:items,conflicts:items.filter(p=>p.state==="conflict").map(p=>p.key),criticality_cutoff:70,generation:"gemini",weight_total_percent:100};
 }
 export function fallbackManifest(baseline:CuratedParameterManifest):ModelManifest {
- const ps=baseline.parameters;
+ const ps=baseline.parameters.map(p=>({...p,class:p.class==="psychological"&&/(?:screen_size|battery_life|storage|ram|budget|price|performance_priority|operating_system|microphone_quality|sound_quality|portability|comfort_level)/.test(p.key)?"functional" as const:p.class}));
  const importance=ps.map(p=>p.hard?3:p.compulsory?2:1);const sum=importance.reduce((a,b)=>a+b,0)||1;
  return {...baseline,generation:"fallback",weight_total_percent:100,parameters:ps.map((p,i)=>({...p,priority:importance[i]! / sum*100}))};
 }

@@ -71,7 +71,7 @@ Input JSON:
 ${JSON.stringify({query:r.query,category_hint:r.category_hint,hard_constraints:r.hard_constraints})}`}
 
 export function validatedIntentRequirements(r:SearchRequest,intent:IntentFormation){
- const fields=intent.required_context.filter(f=>!/(?:availability|rating_check|review_check|source_verification|hours_check|current_calendar|current_date|current_time|week_start|week_end)/.test(f.key)).filter(f=>!(intent.answer_unit==='product'&&/(?:budget|price|operating_system|os_preference|brand)/.test(f.key)));
+ const fields=intent.required_context.filter(f=>!/(?:availability|rating_check|review_check|source_verification|hours_check|current_calendar|current_date|current_time|week_start|week_end)/.test(f.key)).filter(f=>!(intent.answer_unit==='product'&&/(?:budget|price|operating_system|os_preference|brand)/.test(f.key))).filter(f=>!(intent.answer_unit==='product'&&/\b(?:coding|office|gaming|study|editing|work|travel)\b/i.test(r.query)&&/(?:use_case|purpose|coding|workload|software|development|usage)/.test(f.key)));
  // A venue can be discovered without a declared cuisine, budget or atmosphere;
  // those refine ranking, not whether retrieval may begin. Hold only the search
  // area at this stage, rather than letting model phrasing turn preferences into
