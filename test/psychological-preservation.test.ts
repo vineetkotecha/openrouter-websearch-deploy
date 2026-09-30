@@ -78,7 +78,7 @@ it('keeps motives conditional, consolidates overlapping choice comparisons and a
  const {parameterPrompt}=await import('../src/core/architecture.js');
  const {intentFormationPrompt}=await import('../src/core/intent-formation.js');
  for(const p of [parameterPrompt(r,intent),intentFormationPrompt(r)]){
-  expect(p).toMatch(/never infer|No baseless leaps/);
+  expect(p).toMatch(/never infer|Do not infer/);
   expect(p).toContain('sensitive');
   expect(p).toContain('conditional possibilities, never personal answers');
   expect(p).toMatch(/independent.*consequence/);
