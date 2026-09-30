@@ -8,7 +8,7 @@ export function buildFinalAnswer(r:SearchRequest,results:Ranked[],audits:AuditVe
  const options=results.slice(0,5).map(x=>{
   const supported=Object.entries(x.fields??{}).filter(([,f])=>f.state==='supported'&&f.value!==null);
   const missing=Object.entries(x.fields??{}).filter(([,f])=>f.state==='missing').map(([k])=>k.replace(/_/g,' '));
-  const audit=audits.find(a=>(a.candidate_key??a.url)===candidateKey(x));const proven=audit?.state==='pass'&&audit.evidence_state==='supported';
+  const audit=audits.find(a=>(a.candidate_key??a.url)===candidateKey(x));const proven=audit?.state==='pass'&&audit.evidence_state==='supported'&&missing.length===0;
   const why=supported.map(([key,f])=>`${key.replace(/_/g,' ')}: ${f.value}. Source: ${f.evidence??'typed field'}`);
   if(!why.length)why.push(x.entity?`Named in the source: ${x.entity.evidence}`:'Retrieved as a possible match; its decisive facts are not established.');
   if(x.reason&&/Jev|preference/i.test(x.reason))why.push(x.reason);
