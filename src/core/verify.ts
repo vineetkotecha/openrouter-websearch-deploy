@@ -14,18 +14,20 @@ export async function extractSurvivors(input: ProviderResult[], signal?: AbortSi
   const max = o.max ?? 3, maxChars = o.maxChars ?? 8000, budgetChars = (o.tokenBudget ?? 6000) * 4, f = o.fetcher ?? fetch;
   const report: ExtractReport = { attempted: 0, extracted: 0, chars: 0, tokens_est: 0, skipped_budget: 0, failed_http: 0, failed_fetch: 0, supported: 0, partial: 0, unverified: 0 };
   const targets = input.slice(0, max);
+  // Allocate before concurrent reads; every page gets a bounded share.
+  const pageChars = Math.min(maxChars, Math.floor(budgetChars / Math.max(1, targets.length)));
   const out = await Promise.all(targets.map(async x => {
     try {
       const u = new URL(x.url);
       if (!["http:", "https:"].includes(u.protocol) || privateHost.test(u.hostname)) return x;
       report.attempted++;
-      const per = AbortSignal.timeout(o.timeoutMs ?? 4000);
+      const per = AbortSignal.timeout(o.timeoutMs ?? 15000);
       const sig = signal ? AbortSignal.any([signal, per]) : per;
-      const r = await f(`https://r.jina.ai/${x.url}`, { headers: { Accept: "text/plain" }, signal: sig });
+      const r = await f(`https://r.jina.ai/${x.url}`, { headers: { Accept: "text/plain", ...(process.env.JINA_API_KEY ? { Authorization: `Bearer ${process.env.JINA_API_KEY.trim()}` } : {}), "X-Retain-Images": "none" }, signal: sig });
       if (!r.ok) { report.failed_http++; return x; }
-      const remaining = budgetChars - report.chars;
+      const remaining = pageChars;
       if (remaining <= 0) { report.skipped_budget++; return x; }
-      const body = (await Promise.race([r.text(), new Promise<string>((_, rej) => sig.addEventListener("abort", () => rej(new Error("extract timeout")), { once: true }))])).slice(0, Math.min(maxChars, remaining));
+      const body = (await Promise.race([r.text(), new Promise<string>((_, rej) => sig.addEventListener("abort", () => rej(new Error("extract timeout")), { once: true }))])).slice(0, remaining);
       report.chars += body.length; report.extracted++;
       const fa = o.judge ? await gradeWithLlm(x, body, o.judge) : gradeDeterministic(x, body);
       report[fa.state]++;

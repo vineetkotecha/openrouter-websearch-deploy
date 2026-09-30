@@ -54,3 +54,20 @@ describe("extraction diagnostics",()=>{
   expect(r.report.extracted).toBe(1);expect(r.report.supported).toBe(1);
  });
 });
+
+it('authenticates configured survivor reads without leaking credentials into results',async()=>{
+ const old=process.env.JINA_API_KEY;process.env.JINA_API_KEY='test-secret';
+ try{
+  let options:any;
+  const r=await _xs([{provider:'exa',url:'https://shop.example/item',title:'Laptop',snippet:'Laptop'}],undefined,{fetcher:(async(_url:any,o:any)=>{options=o;return {ok:true,text:async()=> 'Laptop\nPrice: ₹64,999\n16 GB RAM'}}) as any,fields:['product_price_inr','ram_gb']});
+  expect(options.headers.Authorization).toBe('Bearer test-secret');
+  expect(options.headers['X-Retain-Images']).toBe('none');
+  expect(r.results[0]!.fields).toMatchObject({product_price_inr:{value:64999,state:'supported'},ram_gb:{value:16,state:'supported'}});
+  expect(JSON.stringify(r)).not.toContain('test-secret');
+ }finally{if(old===undefined)delete process.env.JINA_API_KEY;else process.env.JINA_API_KEY=old;}
+});
+it('allocates a shared extraction token budget before concurrent body reads',async()=>{
+ const rows=Array.from({length:3},(_,i)=>({provider:'exa',url:`https://shop.example/${i}`,title:'Laptop',snippet:''}));
+ const r=await _xs(rows,undefined,{max:3,maxChars:8000,tokenBudget:500,fetcher:(async()=>({ok:true,text:async()=> 'Laptop '+ 'x'.repeat(10000)})) as any});
+ expect(r.report.extracted).toBe(3);expect(r.report.chars).toBeLessThanOrEqual(2000);expect(r.report.tokens_est).toBeLessThanOrEqual(500);
+});
