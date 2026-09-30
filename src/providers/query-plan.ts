@@ -1,3 +1,4 @@
+import {answerStrategy} from "../core/answer-units.js";
 import type {Mandate,SearchRequest} from "../contracts/search.js";
 import {classify,type TaskClass} from "../core/router.js";
 
@@ -29,7 +30,7 @@ export function buildQueryPlan(request:SearchRequest,mandate:Mandate,now=new Dat
  const location=String(get("location","city","region")??"").trim()||undefined,language=request.locale.split(/[-_]/)[0]!.toLowerCase();
  const modeValue=String(get("search_mode","depth")??"").toLowerCase();const mode:SearchMode=modeValue==="deep"?"deep":modeValue==="fast"?"fast":/compare|research|investigate|comprehensive/i.test(request.query)?"deep":"balanced";
  const category=String(mandate.category??request.category_hint??"").toLowerCase();
- const engine:ProviderQueryPlan["vertical"]["engine"]=/shop|product|commerce/.test(category)?"shopping":/local|place|restaurant/.test(category)?"local":task==="shopping"?"shopping":task==="local"?"local":task==="news"?"news":task==="academic"?"academic":task==="finance"?"finance":"web";
+ const engine:ProviderQueryPlan["vertical"]["engine"]=answerStrategy(request)?.unit==="product"||/shop|product|commerce/.test(category)?"shopping":/local|place|restaurant/.test(category)?"local":task==="shopping"?"shopping":task==="local"?"local":task==="news"?"news":task==="academic"?"academic":task==="finance"?"finance":"web";
  const proprietary=list(get("proprietary_sources","included_sources","datasets"));
  return{version:1,query:request.query,objective:mandate.intent,task_class:task,max_results:request.limits.max_results,locale:{language,country:request.country?.toLowerCase(),location},freshness:{from:fromDerived,to,relative},source_policy:{include_domains,exclude_domains,preferred_types:sourceTypes,primary_only:primary},mode,extract_content:task==="semantic"||mode==="deep",vertical:{engine,proprietary_sources:proprietary},trace};
 }
