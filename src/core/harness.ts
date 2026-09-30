@@ -4,7 +4,7 @@ import {namedProductQuery} from "./product-repair.js";
 import {invokeProvider} from "../providers/invoke.js";
 import { nineStageTrace, type TraceEvent } from "./trace.js";
 import { randomUUID } from "node:crypto";
-import { fallbackManifest, type ModelManifest, type AuditVerdict } from "./architecture.js";
+import { fallbackManifest, normalizeAudit, reconcileAudits, type ModelManifest, type AuditVerdict } from "./architecture.js";
 import { curateParameters, curatedRequest } from "./parameter-curation.js";
 import { fallbackIntentFormation, hotelPropertySearch, validatedIntentRequirements } from "./intent-formation.js";
 import { jevRerank } from "./jev-rerank.js";
@@ -200,12 +200,12 @@ export class SearchHarness {
     // Gemini checks the *entire retrieved pool* against the original query before
     // any shortlist. Failure is explicit; hard eligibility remains a separate gate.
     let audit:AuditVerdict[]=[];
-    const runAudit=async(items:ProviderResult[])=>{if(!this.writer.audit||!items.length)return [] as AuditVerdict[];try{return await this.writer.audit(effective,finalMandate,items,intent)}catch{limitations.push("Gemini correctness audit unavailable; source checks and hard gates remain, but the full model audit was not completed.");return [] as AuditVerdict[]}};
+    const runAudit=async(items:ProviderResult[])=>{if(!this.writer.audit||!items.length)return [] as AuditVerdict[];try{return normalizeAudit({verdicts:await this.writer.audit(effective,finalMandate,items,intent)},items)}catch{limitations.push("Gemini correctness audit unavailable; source checks and hard gates remain, but the full model audit was not completed.");return [] as AuditVerdict[]}};
     audit=await runAudit(pool);record("6_result_audit",{phase:"initial",verdicts:audit});
     // One bounded repair is attempted only when the first retrieval is empty or
     // every candidate visibly fails the model check, and remaining provider budget allows it.
     const firstGate=gateResults(effective,finalMandate,pool,intent.answer_unit);
-    const noViableCandidates=pool.length>0&&(firstGate.retained.length===0||(audit.length>0&&firstGate.retained.every(x=>!audit.some(v=>v.url===x.result.url&&v.state==="pass"))));
+    const noViableCandidates=pool.length>0&&(firstGate.retained.length===0||(audit.length>0&&firstGate.retained.every(x=>audit.some(v=>v.url===x.result.url&&v.state==="fail"&&v.evidence_state==="contradicted"))));
     if((!pool.length||noViableCandidates)&&exec.runs.length<request.limits.max_provider_calls){
       const failedProviders=new Set(exec.runs.map(x=>x.provider));
       const modelQuery=intent.answer_unit==="product"?namedProductQuery(pool,finalQuery):undefined;
@@ -261,7 +261,7 @@ export class SearchHarness {
     const extractedByUrl=new Map(extracted.map(x=>[x.url,x]));
     const auditInputs=pool.map(x=>extractedByUrl.get(x.url)??x);
     const sourceAudit=extractedByUrl.size?await runAudit(auditInputs):[];
-    if(sourceAudit.length){const previous=new Map(audit.map(v=>[v.url,v]));audit=sourceAudit.map(v=>previous.get(v.url)?.state==="fail"&&v.state!=="fail"&&!(previous.get(v.url)!.reason.startsWith("Temporal contradiction was not established"))?{...v,state:"fail" as const,reason:`First-pass audit failed: ${previous.get(v.url)!.reason}; post-extraction: ${v.reason}`}:v)}
+    if(sourceAudit.length)audit=reconcileAudits(audit,sourceAudit);
     const firstJob = plan.jobs[0];
     const lateGate=gateResults(effective,finalMandate,[...extracted, ...rest],intent.answer_unit);
     const verification=new Map(lateGate.retained.map(x=>[x.result.url,x.verification]));

@@ -29,7 +29,7 @@ describe("nine-step architecture local contract",()=>{
 describe("repair and complete-pool audit",()=>{
  it("tries one alternate provider after all first-pass model verdicts fail",async()=>{
   const calls:string[]=[];const query=SearchRequestSchema.parse({query:"research battery patents",tenant_id:"t",permissions:{},limits:{max_provider_calls:3,latency_ms:1000,max_results:10}});
-  const writer:any=new HeuristicMandateWriter();writer.audit=async(_r:any,_m:any,items:any[])=>items.map(x=>({url:x.url,state:x.provider==="exa"?"fail":"pass",reason:"test"}));
+  const writer:any=new HeuristicMandateWriter();writer.audit=async(_r:any,_m:any,items:any[])=>items.map(x=>({url:x.url,state:x.provider==="exa"?"fail":"pass",reason:"test",evidence_state:x.provider==="exa"?"contradicted":"supported",evidence_quote:"Patent evidence"}));
   const providers=["exa","tavily"].map(name=>({name,enabled:()=>true,search:async()=>{calls.push(name);return[{provider:name,url:`https://${name}.example.com/1`,title:"Battery patent",snippet:"Patent evidence"}]}}));
   const h=new SearchHarness({SEARCH_TIMEOUT_MS:1000} as any,writer,providers as any,new MemoryStore(),{fetcher:(async()=>({ok:false})) as any});
   const out:any=await h.search(query);expect(out.status).toBe("complete");expect(new Set(calls).size).toBeLessThanOrEqual(2);expect(calls.filter(x=>x==="tavily").length).toBeLessThanOrEqual(1);expect(out.plan.eligibility.audit.some((x:any)=>x.state==="pass")).toBe(true);
