@@ -61,3 +61,15 @@ it('classifies observed gaming, ports and noise keys as functional and merges no
  expect(m.parameters.some(p=>p.key==='noise_level_tolerance')).toBe(false);
  expect(m.parameters.reduce((sum,p)=>sum+p.priority,0)).toBeCloseTo(100);
 });
+
+it('asks for query-specific decision impact without a psychological quota and mandate preserves that allocation',async()=>{
+ const {parameterPrompt}=await import('../src/core/architecture.js');
+ const {mandatePrompt}=await import('../src/prompts/mandate-writer-v2.js');
+ const p=parameterPrompt(r,intent);
+ expect(p).toContain('not from a default functional/psychological split');
+ expect(p).toContain('Separate hard eligibility from ranking importance');
+ expect(p).toContain('relevance and likely decision impact are not confidence in a personal answer');
+ expect(p).toContain('Do not cap psychological factors');
+ expect(p).toContain('not category stereotypes');
+ expect(mandatePrompt('{}')).toContain('Preserve those validated weights exactly');
+});
