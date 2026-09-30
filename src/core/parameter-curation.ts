@@ -1,3 +1,4 @@
+import {physicalProperty} from './parameter-class.js';
 import { randomUUID } from "node:crypto";
 import type { Mandate, SearchRequest } from "../contracts/search.js";
 import { canonicalContextKey, canonicalGaps, heuristicGaps } from "./context-pull.js";
@@ -92,8 +93,9 @@ export function curateParameters(r: SearchRequest, m?: Mandate, revision_of?: st
     put({key:g.key,class:"functional",state:"missing",evidence:[],confidence:0,allowed_uses:["search","ask"],hard:false,material:false,priority:g.result_changing?55:20,effect:"retrieval",question:g.question});
   }
   for(const h of intent?.candidate_human_factors??[]){
-    if(slots.has(`psychological:${h.key}`)||sensitive(h.key))continue;
-    put({key:h.key,class:"psychological",state:"missing",evidence:[],confidence:0,allowed_uses:["rerank","ask"],hard:false,material:false,priority:10,effect:"ranking",question:h.question});
+    const key=canonicalContextKey(h.key),cls=physicalProperty(key)?"functional":"psychological";
+    if(slots.has(`${cls}:${key}`)||sensitive(key))continue;
+    put({key,class:cls,state:"missing",evidence:[],confidence:0,allowed_uses:["rerank","ask"],hard:false,material:false,priority:10,effect:"ranking",question:h.question});
   }
   // Model-authored values never become curated facts just because a broad query
   // phrase resembles their evidence. The mandate may use them as tentative

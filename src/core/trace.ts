@@ -24,7 +24,7 @@ export function nineStageTrace(events:TraceEvent[], status:string) {
   const sections=[
     {heading:TRACE_HEADINGS[0],data:value({query:request?.query,intent:understood?.intent,formed_query:understood?.provider_query})},
     {heading:TRACE_HEADINGS[1],data:curated?{generation:curated.generation,fallback_reason:curated.fallback_reason,parameters:curated.parameters,validated_model_manifest:initial??null}:null},
-    {heading:TRACE_HEADINGS[2],data:curated?{answered:curated.parameters.filter((p:any)=>p.state==='resolved'),missing:curated.parameters.filter((p:any)=>p.state!=='resolved'),caller_context:request?.context}:null},
+    {heading:TRACE_HEADINGS[2],data:curated?{answered:curated.parameters.filter((p:any)=>p.state==='resolved'),missing:curated.parameters.filter((p:any)=>p.state!=='resolved'),caller_context:request?.context,psychological_check:first('2_psychological_curation_check')}:null},
     {heading:TRACE_HEADINGS[3],data:{questions,caller_requests:requested,asked_user:userQuestionIssued}},
     {heading:TRACE_HEADINGS[4],data:curated?{revision_of:request?.curation_revision_of??null,caller_fill_complete:request?.caller_fill_complete??null,filled:curated.parameters.filter((p:any)=>p.state==='resolved').map((p:any)=>({key:p.key,value:p.value,source:p.source,evidence:p.evidence})),unfilled:curated.parameters.filter((p:any)=>p.state!=='resolved').map((p:any)=>p.key)}:null},
     {heading:TRACE_HEADINGS[5],data:value(mandate)},

@@ -127,6 +127,9 @@ export class SearchHarness {
       if(existing){existing.hard=true;existing.value=p.value;existing.evidence=p.evidence as typeof existing.evidence;}
       else finalMandate.factors.push({key:p.key,class:"functional",description:"Explicit requirement from the original request.",value:p.value,hard:true,weight:p.priority/100,confidence:1,evidence:p.evidence as any});
     }
+    const psychological=curated.parameters.filter(p=>p.class==='psychological');
+    const psychologicalState={candidates:psychological.map(p=>({key:p.key,state:p.state,compulsory:p.compulsory})),resolved:psychological.filter(p=>p.state==='resolved').length,note:psychological.some(p=>p.state==='resolved')?'Using supplied evidenced choice preferences.':'No evidenced psychological values supplied; optional choice factors remain unanswered, not inferred.'};
+    record('2_psychological_curation_check',psychologicalState);
     record('6_final_mandate_after_fill',{mandate:finalMandate,curation_id:curated.id});
     const fillDecision={ask:[],defaults:optional.map(p=>({key:p.key,reason:"Good-to-have parameter absent; do not infer it"})),stale:curated.parameters.filter(p=>p.state==="stale").map(p=>p.key)};
     // The final query is model-written after fill. Validate the area before any
@@ -192,7 +195,7 @@ export class SearchHarness {
     const known: ProviderResult[] = plan.classification.known_urls.map(url => ({ provider: "known_url", url, title: url, snippet: "" }));
     let pool = [...known, ...exec.results];
     const repairRuns:typeof exec.runs = [];
-    const limitations: string[] = [];
+    const limitations: string[] = psychologicalState.resolved?[]:[psychologicalState.note];
     // Gemini checks the *entire retrieved pool* against the original query before
     // any shortlist. Failure is explicit; hard eligibility remains a separate gate.
     let audit:AuditVerdict[]=[];
