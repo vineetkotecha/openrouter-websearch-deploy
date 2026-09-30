@@ -1,8 +1,8 @@
 import {canonicalContextKey} from './context-pull.js';
-export type DecisionGroup={key:string;members:string[];role:'eligibility'|'capability'|'physical_fit'|'presentation'|'meaning'|'purchase_confidence'|'routine'|'other';distinct_effect:string};
+export type DecisionGroup={key:string;members:string[];role:'eligibility'|'capability'|'physical_fit'|'presentation'|'meaning'|'purchase_confidence'|'routine'|'other';distinct_effect:string;member_effects?:{key:string;answer_sought:string;consequence:string;independent:boolean;why:string}[]};
 // The model identifies equivalent answers; the validator checks coverage and makes
 // that grouping operational. It does not guess equivalence from key substrings.
-export function decisionGroups(raw:unknown,keys:string[],required=false):DecisionGroup[]{
+export function decisionGroups(raw:unknown,keys:string[],required=false,requireEffects=false):DecisionGroup[]{
  if(raw===undefined&&!required)return [];
  if(!Array.isArray(raw)||!raw.length)throw new Error('decision_groups required');
  const seen=new Set<string>(),ids=new Set<string>();const roles=['eligibility','capability','physical_fit','presentation','meaning','purchase_confidence','routine','other'];
@@ -10,7 +10,16 @@ export function decisionGroups(raw:unknown,keys:string[],required=false):Decisio
   if(!x||typeof x.key!=='string'||!/^[a-z][a-z0-9_]{0,63}$/.test(x.key)||!roles.includes(x.role)||typeof x.distinct_effect!=='string'||!x.distinct_effect.trim()||!Array.isArray(x.members)||!x.members.length)throw new Error('invalid decision_groups shape');
   const key=canonicalContextKey(x.key);const family=({presentation:'social_image_fit',purchase_confidence:'buying_comfort',routine:'usage_pattern'} as Record<string,string>)[x.role];if(family&&key!==family)throw new Error('decision_groups use canonical family key');if(ids.has(key))throw new Error('duplicate decision_groups key');ids.add(key);
   const members=x.members.map((m:unknown)=>{if(typeof m!=='string'||!keys.includes(m))throw new Error('unknown decision_groups member');if(seen.has(m))throw new Error('duplicate decision_groups member');seen.add(m);return m;});
-  return {key,members,role:x.role,distinct_effect:x.distinct_effect.trim().slice(0,500)};
+  let member_effects:DecisionGroup['member_effects'];
+  if(requireEffects||x.member_effects!==undefined){
+   if(!Array.isArray(x.member_effects)||x.member_effects.length!==members.length)throw new Error('decision_groups member effects incomplete');
+   const checked=new Set<string>();member_effects=x.member_effects.map((e:any)=>{
+    if(!e||!members.includes(e.key)||checked.has(e.key)||typeof e.independent!=='boolean'||['answer_sought','consequence','why'].some(k=>typeof e[k]!=='string'||!e[k].trim()))throw new Error('decision_groups invalid member effect');
+    checked.add(e.key);return {key:e.key,answer_sought:e.answer_sought.slice(0,300),consequence:e.consequence.slice(0,500),independent:e.independent,why:e.why.slice(0,500)};
+   });
+   if(members.length>1&&member_effects?.some(e=>e.independent))throw new Error('decision_groups preserve independent consequence in its own slot');
+  }
+  return {key,members,role:x.role,distinct_effect:x.distinct_effect.trim().slice(0,500),member_effects};
  });
  if(keys.some(k=>!seen.has(k)))throw new Error('decision_groups incomplete coverage');
  // One presentation comparison per group; more require an actually different role,

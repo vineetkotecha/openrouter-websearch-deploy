@@ -114,8 +114,19 @@ it('merges model price spelling with a sourced numeric ceiling without weakening
 
 it('preserves independent durability semantics regardless of product key spelling',()=>{
  const q=SearchRequestSchema.parse({tenant_id:'t',query:'watch under 100000 INR'}),i=normalizeIntentFormation({answer_unit:'product',unknowns:[{key:'surface_choice',question:'Which surface?',why:'Appearance and durability under daily wear',result_changing:false}],candidate_human_factors:[{key:'social_image_fit',question:'Any visual preference?',why:'Optional look'}]},q),b=curateParameters(q,undefined,undefined,i);
- const raw={parameters:[{key:'search_object',class:'functional',query_reference:'watch',why:'Object',weight_percent:10,compulsory:false},{key:'social_image_fit',class:'psychological',why:'Look',weight_percent:90,compulsory:false}],decision_groups:[{key:'search_object',members:['search_object'],role:'eligibility',distinct_effect:'Object'},{key:'price_max_inr',members:['price_max_inr'],role:'eligibility',distinct_effect:'Budget'},{key:'social_image_fit',members:['social_image_fit','surface_choice'],role:'presentation',distinct_effect:'Appearance'}]};
- expect(()=>validateModelParameters(raw,q,i,b,true)).toThrow('independent physical');
- raw.decision_groups[2]!.members=['social_image_fit'];raw.decision_groups.push({key:'surface_choice',members:['surface_choice'],role:'capability',distinct_effect:'Durability independently of appearance'});
+ const raw={parameters:[{key:'search_object',class:'functional',query_reference:'watch',why:'Object',weight_percent:10,compulsory:false},{key:'social_image_fit',class:'psychological',why:'Look',weight_percent:90,compulsory:false}],decision_groups:[{key:'search_object',members:['search_object'],role:'eligibility',distinct_effect:'Object'},{key:'price_max_inr',members:['price_max_inr'],role:'eligibility',distinct_effect:'Budget'},{key:'social_image_fit',members:['social_image_fit','surface_choice'],role:'presentation',distinct_effect:'Appearance',member_effects:[{key:'social_image_fit',answer_sought:'Look',consequence:'Visual fit',independent:false,why:'Same comparison'},{key:'surface_choice',answer_sought:'Surface',consequence:'Durability',independent:true,why:'Durability is not appearance'}]}]};
+ expect(()=>validateModelParameters(raw,q,i,b,true)).toThrow('independent consequence');
+ raw.decision_groups[2]!.members=['social_image_fit'];raw.decision_groups[2]!.member_effects=raw.decision_groups[2]!.member_effects?.slice(0,1);raw.decision_groups.push({key:'surface_choice',members:['surface_choice'],role:'capability',distinct_effect:'Durability independently of appearance',member_effects:[{key:'surface_choice',answer_sought:'Surface',consequence:'Durability',independent:true,why:'Independent property'}]});
  const m=validateModelParameters(raw,q,i,b,true);expect(m.parameters.find(p=>p.key==='surface_choice')).toMatchObject({class:'functional',state:'missing',question:'Which surface?'});
+});
+
+it('protects independent consequences across domains without matching domain words or keys',async()=>{
+ const {decisionGroups}=await import('../src/core/decision-groups.js');
+ for(const consequence of ['Makes quiet conversation possible','Avoids unwanted observation','Allows walking access','Avoids unacceptable hazard','Allows an eater to use the result','Resists wear']){
+  const group={key:'social_image_fit',members:['vibe','axis_z'],role:'presentation',distinct_effect:'Look',member_effects:[{key:'vibe',answer_sought:'Look',consequence:'Visual fit',independent:false,why:'Same answer'},{key:'axis_z',answer_sought:'Distinct need',consequence,independent:true,why:'Separate answer changes viability'}]};
+  expect(()=>decisionGroups([group],['vibe','axis_z'],true,true)).toThrow('independent consequence');
+  group.members=['vibe'];group.member_effects=group.member_effects.slice(0,1);
+  expect(()=>decisionGroups([group,{key:'axis_z',members:['axis_z'],role:'capability',distinct_effect:consequence,member_effects:[{key:'axis_z',answer_sought:'Distinct need',consequence,independent:true,why:'Preserved separately'}]}],['vibe','axis_z'],true,true)).not.toThrow();
+ }
+ expect(()=>decisionGroups([{key:'search_object',members:['search_object'],role:'eligibility',distinct_effect:'Item'}],['search_object'],true,true)).toThrow('member effects');
 });

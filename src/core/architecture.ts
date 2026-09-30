@@ -9,21 +9,17 @@ export type ProposedParameter = {key:string;class:"functional"|"psychological";w
 export type ModelManifest = CuratedParameterManifest & {generation:"gemini"|"fallback";weight_total_percent:100;fallback_reason?:string;decision_groups?:DecisionGroup[]};
 const keyPattern=/^[a-z][a-z0-9_]{0,63}$/;
 const restricted=/(?:religion|race|ethnic|gender|sexual|disability|health|medical|politic|(?:^|_)age(?:_|$)|income|credit|biometric)/i;
-// Protect independent physical effects from presentation consolidation by semantic
-// effect text, not a catalogue of product-key spellings.
-const independentPhysicalEffect=(text:string)=>/\b(durab\w*|longevity|wear resistance|scratch\w*|corrosion|water resistance|skin comfort|wearing comfort|fits? comfortably|physical fit|ergonom\w*)\b/i.test(text);
 const usable=(x:unknown)=>x!==undefined&&x!==null&&String(x).trim()!=="";
 const same=(x:unknown,y:unknown)=>JSON.stringify(x)===JSON.stringify(y);
 const uses=(c:SearchRequest["context"][number])=>c.allowed_uses?.length?c.allowed_uses:["search","rerank","ask"] as ("search"|"rerank"|"ask")[];
 /** A model names parameters, never supplies personal values or permission. Explicit constraints and
  * sourced caller facts are re-bound from the request, not accepted from model JSON. */
-export function validateModelParameters(raw:unknown,r:SearchRequest,intent:IntentFormation,baseline:CuratedParameterManifest,requireGroups=false):ModelManifest {
+export function validateModelParameters(raw:unknown,r:SearchRequest,intent:IntentFormation,baseline:CuratedParameterManifest,requireGroups=false,requireEffects=false):ModelManifest {
  if(!raw||typeof raw!=="object"||!Array.isArray((raw as any).parameters))throw new Error("Gemini did not return parameters");
  const sourceProposals=(raw as {parameters:unknown[]}).parameters;
- const protectedFunctional=new Set(intent.unknowns.filter(p=>independentPhysicalEffect(p.why)).map(p=>canonicalContextKey(p.key)));
- for(const p of sourceProposals as ProposedParameter[])if(p?.class==='functional'&&independentPhysicalEffect(p.why??''))protectedFunctional.add(canonicalContextKey(p.key));
  const groupKeys=[...new Set([...sourceProposals.map((p:any)=>p?.key).filter((k:unknown)=>typeof k==='string'),...baseline.parameters.map(p=>p.key)])];
- const groups=decisionGroups((raw as any).decision_groups,groupKeys,requireGroups);
+ const groups=decisionGroups((raw as any).decision_groups,groupKeys,requireGroups,requireEffects);
+ const protectedKeys=new Set(groups.flatMap(g=>g.member_effects?.filter(e=>e.independent).map(e=>canonicalContextKey(e.key))??[]));
  // Model aliases are one factor, not extra weight. Retain the larger proposed
  // weight for an alias group, then normalize the distinct factors together.
  const grouped=new Map<string,unknown>();const originalKeys=new Set<string>();
@@ -94,10 +90,10 @@ export function validateModelParameters(raw:unknown,r:SearchRequest,intent:Inten
  }
  // Consolidate after facts have been bound and preserved. Missing aliases may
  // adopt a group's class; resolved facts of different classes/values cannot merge.
- for(const b of baseline.parameters.filter(p=>p.class==='functional'&&protectedFunctional.has(p.key)))if(!items.some(p=>p.key===b.key))items.push({...b,priority:1});
+ for(const b of baseline.parameters.filter(p=>protectedKeys.has(p.key)))if(!items.some(p=>p.key===b.key))items.push({...b,priority:1});
  for(const g of groups){
-  const protectedMembers=g.members.map(canonicalContextKey).filter(k=>protectedFunctional.has(k));
-  if(protectedMembers.length&&(['presentation','meaning','purchase_confidence','routine'].includes(g.role)||g.members.length>1||g.key!==protectedMembers[0]))throw new Error('decision_groups preserve independent physical effect in its own functional slot');
+  const protectedMembers=g.members.map(canonicalContextKey).filter(k=>protectedKeys.has(k));
+  if(protectedMembers.length&&(g.members.length>1||g.key!==protectedMembers[0]))throw new Error('decision_groups preserve independent consequence in its own slot');
   const members=new Set(g.members.map(canonicalContextKey));const ps=items.filter(p=>members.has(p.key));if(!ps.length)continue;
   const resolved=ps.filter(p=>p.state==='resolved').sort((a,b)=>Number(b.hard)-Number(a.hard));
   const hard=resolved.find(p=>p.hard);if(hard&&g.key!==hard.key)throw new Error('decision_groups preserve canonical hard key');
@@ -122,7 +118,7 @@ export function validateModelParameters(raw:unknown,r:SearchRequest,intent:Inten
 
  return {...baseline,intent,parameters:items,conflicts:items.filter(p=>p.state==="conflict").map(p=>p.key),criticality_cutoff:70,generation:"gemini",weight_total_percent:100,decision_groups:groups};
 }
-export function fallbackManifest(baseline:CuratedParameterManifest,requireGroups=false):ModelManifest {
+export function fallbackManifest(baseline:CuratedParameterManifest,requireGroups=false,requireEffects=false):ModelManifest {
  const ps=baseline.parameters.map(p=>({...p,class:p.class==="psychological"&&physicalProperty(p.key)?"functional" as const:p.class}));
  const importance=ps.map(p=>p.hard?3:p.compulsory?2:1);const sum=importance.reduce((a,b)=>a+b,0)||1;
  return {...baseline,generation:"fallback",weight_total_percent:100,parameters:ps.map((p,i)=>({...p,priority:importance[i]! / sum*100}))};
@@ -143,11 +139,11 @@ For product fit, ask about the actual fit requirement rather than a binary gende
 For each parameter's why, give a brief decision-impact justification tied to this query, including why its relative weight is large or small. Return concise justifications, not private reasoning. After allocation, check whether the combined weights reflect the decision's main purpose rather than the number of fields in each class. Assign weights totaling 100 percent across all parameters; the validator will normalize a valid positive total, but do not invent factors to fill weight.
 Use only the supplied evidence. Do not infer personal traits or sensitive attributes. Work through the checks internally; do not return private reasoning.
 
-Return decision_groups: model-authored equivalence groups with a canonical key, exact member keys, one decision role and a concise independent ranking/filter effect. Cover every proposed key and every prior baseline key supplied in grouping_keys exactly once. Group synonymous price ceiling fields together. Group visual style, image, design philosophy, recognition and brand preference when they seek the same presentation answer; do not add multiple presentation groups. A separate brand affinity is allowed only when its independent answer/effect is truly different, with role other and explicit distinction. Keep physical materials, dimensions and mechanism separate when independently checkable. If a factor has an independent durability, longevity, wear resistance, physical fit or wearing-comfort effect, it must keep its own functional slot and singleton group, even when it also affects appearance. Check the prior intent why for those effects and preserve the exact original key; do not silently omit it from parameters or fold it into a presentation group. For a watch case material, appearance is one effect, but durability and comfort are independent, so retain material as functional while presentation stays a separate optional question. Keep personal meaning, seller assurance and daily routine separate from presentation. Each group uses the largest member weight, not their sum, then all weights normalize to100. This prevents an alias receiving more weight merely because it has more names. Never merge different sourced values or override a hard constraint. Choose stable canonical keys social_image_fit, buying_comfort and usage_pattern for their respective roles.
+Return decision_groups: model-authored equivalence groups with a canonical key, exact member keys, one decision role and a concise independent ranking/filter effect. Cover every proposed key and every prior baseline key supplied in grouping_keys exactly once. Group synonymous price ceiling fields together. Group visual style, image, design philosophy, recognition and brand preference when they seek the same presentation answer; do not add multiple presentation groups. A separate brand affinity is allowed only when its independent answer/effect is truly different, with role other and explicit distinction. Keep physical materials, dimensions and mechanism separate when independently checkable. For EVERY member return member_effects with its exact key, answer_sought, consequence, independent:true/false and why. Read its original question and why, not the key spelling. Ask whether the same answer to the group question captures ALL of this member's result-changing consequences. If any consequence remains independently actionable, mark independent:true and keep that member in its own singleton group with its original key and appropriate class; include it in parameters even if you otherwise would omit it. For genuinely equivalent members, explain why the group answer preserves each consequence. This rule applies to any domain, not just physical products. Example only: a material choice can change durability independently of looks; a date-place sound level can enable conversation independently of atmosphere; access can change whether a place is reachable independently of its image. Privacy, safety or dietary compatibility may be separate decisions if they have distinct consequences. These are reasoning examples, not mandatory restaurant or product checklists. Do not infer a need merely because it is in an example. Preserve functional consequences as functional, subjective preferences as psychological. Do not move a consequence into presentation simply because both affect the same overall experience. Keep personal meaning, seller assurance and daily routine separate from presentation. Each group uses the largest member weight, not their sum, then all weights normalize to100. This prevents an alias receiving more weight merely because it has more names. Never merge different sourced values or override a hard constraint. Choose stable canonical keys social_image_fit, buying_comfort and usage_pattern for their respective roles.
 Return one JSON object only, without markdown, commentary or extra fields.
 
 Return this structure:
-{"decision_groups":[{"key":"canonical_key","members":["exact_input_or_proposed_key"],"role":"eligibility|capability|physical_fit|presentation|meaning|purchase_confidence|routine|other","distinct_effect":"independent decision effect"}],"parameters":[{"key":"snake_case","class":"functional|psychological","why":"why this search needs the factor","weight_percent":0,"compulsory":false,"hard":false,"effect":"eligibility|retrieval|ranking","question":"natural question if missing","query_reference":"exact query phrase, or omit"}]}
+{"decision_groups":[{"key":"canonical_key","members":["exact_input_or_proposed_key"],"role":"eligibility|capability|physical_fit|presentation|meaning|purchase_confidence|routine|other","distinct_effect":"independent decision effect","member_effects":[{"key":"exact_member_key","answer_sought":"what this slot learns","consequence":"how its answer changes choices","independent":false,"why":"why group answer preserves the consequence or needs a separate slot"}]}],"parameters":[{"key":"snake_case","class":"functional|psychological","why":"why this search needs the factor","weight_percent":0,"compulsory":false,"hard":false,"effect":"eligibility|retrieval|ranking","question":"natural question if missing","query_reference":"exact query phrase, or omit"}]}
 
 Input JSON:
 ${JSON.stringify({query:r.query,intent,grouping_keys:baseline?.parameters.map(p=>({key:p.key,class:p.class,state:p.state})),hard_constraints:r.hard_constraints,known_keys:r.context.map(c=>({key:c.key,class:c.class,source:c.source,confidence:c.confidence}))})}`}
