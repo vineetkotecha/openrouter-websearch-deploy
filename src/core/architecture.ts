@@ -7,6 +7,7 @@ export type ProposedParameter = {key:string;class:"functional"|"psychological";w
 export type ModelManifest = CuratedParameterManifest & {generation:"gemini"|"fallback";weight_total_percent:100;fallback_reason?:string};
 const keyPattern=/^[a-z][a-z0-9_]{0,63}$/;
 const restricted=/(?:religion|race|ethnic|gender|sexual|disability|health|medical|politic|age|income|credit|biometric)/i;
+const physicalProperty=(key:string)=>/(?:screen_size|battery_life|storage|ram|budget|price|performance_priority|operating_system|microphone_quality|sound_quality|portability|comfort_level|build_quality|display_quality|keyboard_quality)/.test(key);
 const usable=(x:unknown)=>x!==undefined&&x!==null&&String(x).trim()!=="";
 const same=(x:unknown,y:unknown)=>JSON.stringify(x)===JSON.stringify(y);
 const uses=(c:SearchRequest["context"][number])=>c.allowed_uses?.length?c.allowed_uses:["search","rerank","ask"] as ("search"|"rerank"|"ask")[];
@@ -14,14 +15,31 @@ const uses=(c:SearchRequest["context"][number])=>c.allowed_uses?.length?c.allowe
  * sourced caller facts are re-bound from the request, not accepted from model JSON. */
 export function validateModelParameters(raw:unknown,r:SearchRequest,intent:IntentFormation,baseline:CuratedParameterManifest):ModelManifest {
  if(!raw||typeof raw!=="object"||!Array.isArray((raw as any).parameters))throw new Error("Gemini did not return parameters");
- const proposals=(raw as {parameters:unknown[]}).parameters;
+ const sourceProposals=(raw as {parameters:unknown[]}).parameters;
+ // Model aliases are one factor, not extra weight. Retain the larger proposed
+ // weight for an alias group, then normalize the distinct factors together.
+ const grouped=new Map<string,unknown>();const originalKeys=new Set<string>();
+ for(const x of sourceProposals){
+  if(!x||typeof x!=="object"){grouped.set(`invalid_${grouped.size}`,x);continue;}
+  const p={...x} as ProposedParameter;
+  const originalId=`${p.class}:${p.key}`;if(originalKeys.has(originalId))throw new Error("duplicate parameter");originalKeys.add(originalId);
+  if(typeof p.key==="string"){
+   p.key=canonicalContextKey(p.key);
+   if(p.class==="psychological"&&physicalProperty(p.key))p.class="functional";
+   if(/^(?:budget|budget_range|price_max)$/.test(p.key)&&baseline.parameters.some(b=>b.key==="price_max_inr"&&b.hard))p.key="price_max_inr";
+  }
+  const id=`${p.class}:${p.key}`,old=grouped.get(id) as ProposedParameter|undefined;
+  if(!old)grouped.set(id,p);
+  else if(old.key!==undefined){grouped.set(id,{...old,...p,weight_percent:Math.max(old.weight_percent,p.weight_percent),hard:old.hard||p.hard,query_reference:old.query_reference??p.query_reference});}
+ }
+ const proposals=[...grouped.values()];
  if(proposals.length<1||proposals.length>60)throw new Error("parameter count outside 1..60");
  const seen=new Set<string>();const items:CuratedParameter[]=[];let discardedUnsafeWeight=0;
  const understoodRequired=new Set(validatedIntentRequirements(r,intent).map(x=>canonicalContextKey(x.key)));
  for(const candidate of proposals){
   if(!candidate||typeof candidate!=="object")throw new Error("invalid parameter");
   const p={...candidate} as ProposedParameter;
-  if(p.class==="psychological"&&/(?:screen_size|battery_life|storage|ram|budget|price|performance_priority|operating_system|microphone_quality|sound_quality|portability|comfort_level)/.test(p.key))p.class="functional";
+  if(p.class==="psychological"&&physicalProperty(p.key))p.class="functional";
   if(/^(?:budget|budget_range|price_max|price_limit_inr)$/.test(p.key)&&baseline.parameters.some(b=>b.key==="price_max_inr"&&b.hard))p.key="price_max_inr";
   const key=typeof p.key==="string"?canonicalContextKey(p.key):"";
   if(key==="search_object"&&(!p.query_reference||!r.query.toLowerCase().includes(p.query_reference.toLowerCase())))throw new Error("search_object needs an exact query phrase");
@@ -70,7 +88,7 @@ export function validateModelParameters(raw:unknown,r:SearchRequest,intent:Inten
  return {...baseline,intent,parameters:items,conflicts:items.filter(p=>p.state==="conflict").map(p=>p.key),criticality_cutoff:70,generation:"gemini",weight_total_percent:100};
 }
 export function fallbackManifest(baseline:CuratedParameterManifest):ModelManifest {
- const ps=baseline.parameters.map(p=>({...p,class:p.class==="psychological"&&/(?:screen_size|battery_life|storage|ram|budget|price|performance_priority|operating_system|microphone_quality|sound_quality|portability|comfort_level)/.test(p.key)?"functional" as const:p.class}));
+ const ps=baseline.parameters.map(p=>({...p,class:p.class==="psychological"&&physicalProperty(p.key)?"functional" as const:p.class}));
  const importance=ps.map(p=>p.hard?3:p.compulsory?2:1);const sum=importance.reduce((a,b)=>a+b,0)||1;
  return {...baseline,generation:"fallback",weight_total_percent:100,parameters:ps.map((p,i)=>({...p,priority:importance[i]! / sum*100}))};
 }
