@@ -1,3 +1,5 @@
+import {verifyOptionLinks} from './option-links.js';
+import {buildFinalAnswer} from './answer.js';
 import {candidateKey,collectionSource} from './entities.js';
 import {gradeProvider,providerVertical,summarizeCapabilities,matchCapability,type CapabilityObservation} from '../learning/provider-capabilities.js';
 import {BENCHMARK_SEED} from '../learning/provider-seed.js';
@@ -301,6 +303,9 @@ export class SearchHarness {
         known_urls: plan.classification.known_urls, extraction: report, context: contextUsed(effective), curation:curated, eligibility:{excluded:[...earlyGate.excluded,...lateGate.excluded],retained:allowed.size,audit}, formation:{first:firstPass.formed_query,post:finalQuery,revision_of:request.curation_revision_of,used_keys:formed.context_keys}, gaps: finalMandate.gaps.map(g => ({ key: g.key, material: g.material })), fill: plan.classification.structured_fields.length ? fillSummary(plan.classification.structured_fields, extracted.map(x => (x as any).fields)) : undefined, notes: [...plan.notes,...fillDecision.defaults.map(x=>`default:${x.key} - ${x.reason}`),`jev_rerank: ${reranked.successful}/${reranked.attempted}; ${reranked.reason}; ${reranked.latency_ms} ms; tokens ${reranked.usage.input_tokens}/${reranked.usage.output_tokens}`],
       },
     };
+    const linksChecked=await verifyOptionLinks(extracted,Math.min(3,plan.budget.max_extracts),this.opts.fetcher);
+    const linkChecks=new Map(linksChecked.map(x=>[candidateKey(x),(x.raw as any)?.option_link_check]));
+    response.answer=buildFinalAnswer(effective,response.results,audit,limitations,linkChecks);record('11_answer_synthesis',response.answer);
     response.trace=nineStageTrace(traceEvents,response.status);
     record('11_response',{status:response.status,episode_id:response.episode_id,result_count:response.results.length});
     // Storage must never fail a search: record the failure and still return results.
