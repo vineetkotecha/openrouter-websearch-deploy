@@ -196,6 +196,7 @@ export class SearchHarness {
     let pool = [...known, ...exec.results];
     const repairRuns:typeof exec.runs = [];
     const limitations: string[] = psychologicalState.resolved?[]:[psychologicalState.note];
+    if(intent.formation_warning)limitations.push(intent.formation_warning);
     // Gemini checks the *entire retrieved pool* against the original query before
     // any shortlist. Failure is explicit; hard eligibility remains a separate gate.
     let audit:AuditVerdict[]=[];
