@@ -38,3 +38,15 @@ it('preserves relevant image and usage slots through both safety gates without t
  expect(m.parameters.some(p=>p.key==='age')).toBe(false);
  expect(m.parameters.reduce((sum,p)=>sum+p.priority,0)).toBeCloseTo(100);
 });
+
+it('canonicalizes model-renamed decision families without duplicate slots or weight inflation',()=>{
+ const i=normalizeIntentFormation({answer_unit:'product',candidate_human_factors:[{key:'usage_pattern',question:'Where do you code?',why:'Routine affects fit'},{key:'social_image_fit',question:'What look feels right?',why:'Visual fit'},{key:'buying_comfort',question:'What helps you choose?',why:'Purchase confidence'}]},r);
+ const b=curateParameters(r,undefined,undefined,i);
+ const proposal=(key:string,weight:number)=>({key,class:'psychological',why:'Relevant choice factor',weight_percent:weight,compulsory:false,question:'Optional choice?'});
+ const m=validateModelParameters({parameters:[{key:'search_object',class:'functional',why:'Item sought',query_reference:'laptop',weight_percent:70,compulsory:false},proposal('usage_pattern',5),proposal('usage_pattern_daily',10),proposal('social_image_fit_preferences',10),proposal('buying_comfort_preference',10)]},r,i,b);
+ for(const key of ['usage_pattern','social_image_fit','buying_comfort'])expect(m.parameters.filter(p=>p.key===key)).toHaveLength(1);
+ expect(m.parameters.some(p=>p.key==='usage_pattern_daily')).toBe(false);
+ expect(m.parameters.find(p=>p.key==='usage_pattern')!.priority/m.parameters.find(p=>p.key==='search_object')!.priority).toBeCloseTo(10/70);
+ expect(m.parameters.find(p=>p.key==='usage_pattern')?.value).toBeUndefined();
+ expect(m.parameters.reduce((sum,p)=>sum+p.priority,0)).toBeCloseTo(100);
+});
