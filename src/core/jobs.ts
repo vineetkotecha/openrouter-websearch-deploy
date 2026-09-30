@@ -228,6 +228,7 @@ export type PlannedJob = {
   factor_keys?: string[];
   query?: string;
   routing_policy?: string;
+  selected_providers?: string[];
 };
 
 export type JobPlan = { version: 1; classification: Classification; budget: Budget; max_provider_calls: number; jobs: PlannedJob[]; notes: string[] };
@@ -329,6 +330,11 @@ export async function executePlan(plan: JobPlan, providers: SearchProvider[], ca
     return r.results;
   };
   const runJob = async (job: PlannedJob, role: JobRun["role"]) => {
+    if(job.selected_providers){
+      const results:ProviderResult[]=[];
+      for(const name of job.selected_providers){if(callsStarted>=plan.max_provider_calls){skipped.push(`${job.id}:${name}: provider call cap reached`);break}results.push(...await runOne(job,name,role))}
+      return results;
+    }
     let res = await runOne(job, job.primary, role);
     if ((res.length === 0 || grade(res) < lowGrade) && job.fallback && callsStarted < plan.max_provider_calls && plan.budget.max_providers_per_job > 1) {
       fallback_used.push(`${job.id}:${job.fallback}`);
