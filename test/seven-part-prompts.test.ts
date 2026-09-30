@@ -14,4 +14,4 @@ it('briefs cover the job and data without exposing the seven-point preparation s
  for(const text of texts.filter(t=>!t.startsWith('choose')))expect(text).toContain(r.query);
 });
 
-it('understanding produces an enhanced query for the next parameter-curation step, while preserving raw evidence',()=>{const r=SearchRequestSchema.parse({query:'laptop for coding',tenant_id:'t'});const p=intentFormationPrompt(r);expect(p).toContain('enhanced_query');expect(p).toContain('next step generates the axes');expect(p).toContain('No fixed list of parameters');expect(p).toContain('laptop for coding');});
+it('understanding produces an enhanced query for the next parameter-curation step, while preserving raw evidence',()=>{const r=SearchRequestSchema.parse({query:'laptop for coding',tenant_id:'t'});const p=intentFormationPrompt(r);expect(p).toContain('enhanced_query');expect(p).toContain('Next we will curate the parameters');expect(p).toContain('Example to reason from, not the current task');expect(p).toContain('laptop for coding');});

@@ -18,7 +18,7 @@ it('has no forced psychological minimum for purely factual queries',()=>{
 it('requires consideration, not a forced factor: relevant families form valueless slots and irrelevant ones do not',async()=>{
  const {validateHumanFactorConsiderations}=await import('../src/core/intent-formation.js');
  const raw={answer_unit:'product',human_factor_considerations:[{family:'social_image_fit',relevant:true,why:'Used in shared work settings where desired look may change fit',question:'What look would feel right in your work setting?',value:'high status'},{family:'buying_comfort',relevant:true,why:'Purchase commitment with alternatives',question:'What would help you feel comfortable choosing one?'},{family:'usage_pattern',relevant:false,why:'Already enough factual use requirements for this lookup'}]};
- expect(()=>validateHumanFactorConsiderations(raw)).not.toThrow();const i=normalizeIntentFormation(raw,r);expect(i.candidate_human_factors.map(x=>x.key)).toEqual(['social_image_fit','buying_comfort']);expect(i.candidate_human_factors.every(x=>!('value' in x))).toBe(true);expect(i.human_factor_considerations).toHaveLength(3);expect(()=>validateHumanFactorConsiderations({human_factor_considerations:[]})).not.toThrow();
+ expect(()=>validateHumanFactorConsiderations(raw)).not.toThrow();const i=normalizeIntentFormation(raw,r);expect(i.candidate_human_factors.map(x=>x.key)).toEqual(['social_image_fit','buying_comfort']);expect(i.candidate_human_factors.every(x=>!('value' in x))).toBe(true);expect(i.human_factor_considerations).toHaveLength(3);expect(()=>validateHumanFactorConsiderations({human_factor_considerations:[]})).toThrow('consideration');
 });
 
 it('preserves relevant image and usage slots through both safety gates without treating age substrings as demographics',()=>{
@@ -66,11 +66,11 @@ it('asks for query-specific decision impact without a psychological quota and ma
  const {parameterPrompt}=await import('../src/core/architecture.js');
  const {mandatePrompt}=await import('../src/prompts/mandate-writer-v2.js');
  const p=parameterPrompt(r,intent);
- expect(p).toContain('No stock parameter list');
- expect(p).toContain('Explicit requirements are hard');
- expect(p).toContain('Missing values do not prove preferences');
- expect(p).toContain('not the number of fields or a class quota');
- expect(p).toContain('category template');
+ expect(p).toContain('not from a default functional/psychological split');
+ expect(p).toContain('Separate hard eligibility from ranking importance');
+ expect(p).toContain('relevance and likely decision impact are not confidence in a personal answer');
+ expect(p).toContain('Do not cap psychological factors');
+ expect(p).toContain('not category stereotypes');
  expect(mandatePrompt('{}')).toContain('Preserve those validated weights exactly');
 });
 
@@ -78,11 +78,12 @@ it('keeps motives conditional, consolidates overlapping choice comparisons and a
  const {parameterPrompt}=await import('../src/core/architecture.js');
  const {intentFormationPrompt}=await import('../src/core/intent-formation.js');
  for(const p of [parameterPrompt(r,intent),intentFormationPrompt(r)]){
-  expect(p).toMatch(/never infer|Do not infer/);
-  expect(p).toContain('sensitive');
-  expect(p).toContain('conditional possibilities, never personal answers');
-  expect(p).toMatch(/independent.*consequence/);
-  expect(p).toContain('do not ask gender to infer size or style');
+  expect(p).toContain('Treat every unconfirmed motive as a conditional possibility');
+  expect(p).toContain('does not establish a desire for status');
+  expect(p).toContain('group overlapping choice questions by the underlying answer');
+  expect(p).toContain('independent ranking effect');
+  expect(p).toContain('optional wrist size, preferred case dimensions');
+  expect(p).toContain('Do not ask gender to infer');
  }
 });
 
@@ -152,5 +153,5 @@ it('classifies declared functional consequences independently of routine role an
  ]};
  const m=validateModelParameters(raw,q,i,b,true,true);
  expect(m.parameters.filter(p=>p.key!=='search_object').every(p=>p.class==='functional')).toBe(true);
- const {parameterPrompt}=await import('../src/core/architecture.js');expect(parameterPrompt(q,i)).toContain('merely restates other practical axes');
+ const {parameterPrompt}=await import('../src/core/architecture.js');expect(parameterPrompt(q,i)).toContain('must not duplicate a physical mobility');
 });

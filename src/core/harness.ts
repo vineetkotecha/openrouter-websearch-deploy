@@ -1,4 +1,3 @@
-import type {DecisiveFact} from './fact-schema.js';
 import {verifyOptionLinks} from './option-links.js';
 import {buildFinalAnswer} from './answer.js';
 import {candidateKey,collectionSource} from './entities.js';
@@ -233,10 +232,7 @@ export class SearchHarness {
     const known_first = [...ordered.filter(x => x.provider === "known_url"), ...ordered.filter(x => x.provider !== "known_url")];
     record('7_triage_and_dedupe',{pool_count:pool.length,eligibility:{retained:earlyGate.retained.length,excluded:earlyGate.excluded},audit,triaged:triaged.map(x=>({rank:x.rank,url:x.url,title:x.title,mandate_fit:x.mandate_fit,faithfulness:x.faithfulness})),ordered_urls:known_first.map(x=>x.url)});
     if(intent.answer_unit==="product")known_first.sort((a,b)=>Number(/\/(?:dp|product|p)\//i.test(b.url))-Number(/\/(?:dp|product|p)\//i.test(a.url)));
-    let factSchema:DecisiveFact[]|undefined;let schemaFailed=false;
-    if(this.writer.factSchema)try{factSchema=await this.writer.factSchema(effective,finalMandate);}catch{schemaFailed=true;limitations.push('Context-specific decisive-fact schema unavailable; fields remain unverified.');factSchema=[{key:'decisive_schema_unavailable',description:'Cannot verify requirements without the context-specific schema',type:'text',needed_for:'eligibility'}];}
-    record('8_decisive_fact_schema',{facts:factSchema??[],generation:schemaFailed?'unavailable':factSchema?'model':'legacy'});
-    const { results: extracted, report } = await extractSurvivors(known_first, undefined, { max: Math.max(plan.budget.max_extracts, known.length ? Math.min(known.length, 5) : 0), maxChars: plan.budget.max_extract_chars, tokenBudget: plan.budget.token_budget, fetcher: this.opts.fetcher, judge: this.opts.judge, schema:factSchema, contextReader:this.writer.readContextFacts?.bind(this.writer), vertical:intent.answer_unit==='product'||intent.answer_unit==='local_business'||intent.answer_unit==='travel_destination'?intent.answer_unit:undefined, factReader:factSchema?undefined:this.writer.readFacts?.bind(this.writer), fields: factSchema?factSchema.map(f=>f.key):intent.answer_unit==="product"?[...new Set([...plan.classification.structured_fields,"product_price_inr","ram_gb"])]:plan.classification.structured_fields});
+    const { results: extracted, report } = await extractSurvivors(known_first, undefined, { max: Math.max(plan.budget.max_extracts, known.length ? Math.min(known.length, 5) : 0), maxChars: plan.budget.max_extract_chars, tokenBudget: plan.budget.token_budget, fetcher: this.opts.fetcher, judge: this.opts.judge, vertical:intent.answer_unit==='product'||intent.answer_unit==='local_business'||intent.answer_unit==='travel_destination'?intent.answer_unit:undefined, factReader:this.writer.readFacts?.bind(this.writer), fields: intent.answer_unit==="product"?[...new Set([...plan.classification.structured_fields,"product_price_inr","ram_gb"])]:plan.classification.structured_fields});
     if(report.entities)pool=[...pool.filter(x=>!extracted.some(e=>e.entity?.source_url===x.url)),...extracted.filter(x=>x.entity)];
     const rest = eligiblePool.filter(x => !known_first.includes(x)&&!extracted.some(e=>e.entity?.source_url===x.url));
     record('8_extraction',{report,extracted:extracted.map(x=>({provider:x.provider,url:x.url,title:x.title,fields:x.fields})),untriaged_count:rest.length});
@@ -272,7 +268,7 @@ export class SearchHarness {
     const sourceAudit=extractedByUrl.size?await runAudit(auditInputs):[];
     if(sourceAudit.length)audit=reconcileAudits(audit,sourceAudit);
     const firstJob = plan.jobs[0];
-    const lateGate=gateResults(effective,finalMandate,[...extracted, ...rest],intent.answer_unit,factSchema);
+    const lateGate=gateResults(effective,finalMandate,[...extracted, ...rest],intent.answer_unit);
     const verification=new Map(lateGate.retained.map(x=>[candidateKey(x.result),x.verification]));
     // The audit sees the complete retrieved pool, not a preselected top-eight shortlist.
     const veto=new Set(audit.filter(x=>x.state==="fail").map(x=>x.candidate_key??x.url));
@@ -286,7 +282,7 @@ export class SearchHarness {
     const reranked=await jevRerank(effective,finalMandate,eligibleForJev);
     if(reranked.reason!=="reranked")limitations.push(`Jev rerank not completed: ${reranked.reason}.`);
     record('10_jev_rerank',reranked);
-    const providerFeedback=observedRuns.map(run=>gradeProvider({provider:run.provider,query_class:run.job.query_class,answer_unit:intent.answer_unit,kind:run.job.kind,vertical:providerVertical(run.provider,{...effective,query:run.job.query??finalQuery},finalMandate,run.job.search_vertical),status:run.status,latency_ms:run.latency_ms,results:run.results.map(x=>extractedByUrl.get(candidateKey(x))??x),request:effective,mandate:finalMandate,fields:factSchema?factSchema.map(f=>f.key):intent.answer_unit==='product'?['product_price_inr','ram_gb']:intent.answer_unit==='local_business'?['price_for_two_inr','location']:plan.classification.structured_fields}));
+    const providerFeedback=observedRuns.map(run=>gradeProvider({provider:run.provider,query_class:run.job.query_class,answer_unit:intent.answer_unit,kind:run.job.kind,vertical:providerVertical(run.provider,{...effective,query:run.job.query??finalQuery},finalMandate,run.job.search_vertical),status:run.status,latency_ms:run.latency_ms,results:run.results.map(x=>extractedByUrl.get(candidateKey(x))??x),request:effective,mandate:finalMandate,fields:intent.answer_unit==='product'?['product_price_inr','ram_gb']:intent.answer_unit==='local_business'?['price_for_two_inr','location']:plan.classification.structured_fields}));
     record('6_provider_feedback',{version:1,runs:providerFeedback,grade:'retrieval proxy; not user outcome',persistence:request.permissions.may_retain&&request.permissions.may_learn?'tenant-local episode':'not persisted for learning'});
     const response: SearchResponse = {
       status: "complete", episode_id,
@@ -309,7 +305,7 @@ export class SearchHarness {
     };
     const linksChecked=await verifyOptionLinks(extracted,Math.min(3,plan.budget.max_extracts),this.opts.fetcher);
     const linkChecks=new Map(linksChecked.map(x=>[candidateKey(x),(x.raw as any)?.option_link_check]));
-    response.answer=buildFinalAnswer(effective,response.results,audit,limitations,linkChecks,intent.intended_action);record('11_answer_synthesis',response.answer);
+    response.answer=buildFinalAnswer(effective,response.results,audit,limitations,linkChecks);record('11_answer_synthesis',response.answer);
     response.trace=nineStageTrace(traceEvents,response.status);
     record('11_response',{status:response.status,episode_id:response.episode_id,result_count:response.results.length});
     // Storage must never fail a search: record the failure and still return results.
