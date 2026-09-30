@@ -130,3 +130,17 @@ it('protects independent consequences across domains without matching domain wor
  }
  expect(()=>decisionGroups([{key:'search_object',members:['search_object'],role:'eligibility',distinct_effect:'Item'}],['search_object'],true,true)).toThrow('member effects');
 });
+
+it('normalizes equivalent family names by role but preserves independently consequential singleton names',async()=>{
+ const {decisionGroups}=await import('../src/core/decision-groups.js');
+ const effect=(key:string,independent=false)=>({key,answer_sought:'Answer',consequence:'Choice changes',independent,why:independent?'Separate answer needed':'Same answer preserves this effect'});
+ const groups=decisionGroups([
+  {key:'venue_vibe',members:['vibe'],role:'presentation',distinct_effect:'Appearance',member_effects:[effect('vibe')]},
+  {key:'formality',members:['formality'],role:'presentation',distinct_effect:'Dress and service expectation',member_effects:[effect('formality',true)]},
+  {key:'venue_assurance',members:['reviews'],role:'purchase_confidence',distinct_effect:'Reliability',member_effects:[effect('reviews')]}
+ ],['vibe','formality','reviews'],true,true);
+ expect(groups.map(g=>g.key)).toEqual(['social_image_fit','formality','buying_comfort']);
+ expect(()=>decisionGroups([{key:'renamed',members:['formality'],role:'presentation',distinct_effect:'Expectation',member_effects:[effect('formality',true)]}],['formality'],true,true)).toThrow('independent consequence');
+ expect(()=>decisionGroups([{key:'vibe',members:['vibe','formality'],role:'presentation',distinct_effect:'Appearance',member_effects:[effect('vibe'),effect('formality',true)]}],['vibe','formality'],true,true)).toThrow('independent consequence');
+ expect(()=>decisionGroups([{key:'vibe',members:['vibe'],role:'presentation',distinct_effect:'Appearance',member_effects:[effect('vibe')]},{key:'look',members:['look'],role:'presentation',distinct_effect:'Appearance',member_effects:[effect('look')]}],['vibe','look'],true,true)).toThrow('duplicate');
+});

@@ -99,3 +99,10 @@ it('does not leak an unreferenced agent-understanding factor into the final mand
  const out:any=await harness().search(r);expect(out.status).toBe('complete');expect(out.plan.curation.parameters.some((p:any)=>p.key==='imagined_style')).toBe(false);
 });
 it('resolves a named local search area from the original query',()=>{const r=SearchRequestSchema.parse({tenant_id:'t',query:'Find a lunch date experience in Bandra Mumbai'});const intent=fallbackIntentFormation(r);intent.answer_unit='local_business';expect(curateParameters(r,undefined,undefined,intent).parameters.find(p=>p.key==='location')).toMatchObject({state:'resolved',value:'Bandra Mumbai',source:'query'});});
+
+it('stops local area parsing at a following constraint while preserving multiword locations',()=>{
+ for(const [query,area] of [['Best place for a first date dinner in Indiranagar under 3000 INR for two','Indiranagar'],['dinner in Greater Kailash for two','Greater Kailash'],['restaurant near MG Road with outdoor seating','MG Road'],['cafes in Indiranagar','Indiranagar']]){
+  const r=req({query}),intent={...fallbackIntentFormation(r),answer_unit:'local_business' as const};
+  expect(curateParameters(r,undefined,undefined,intent).parameters.find(p=>p.key==='location')?.value).toBe(area);
+ }
+});
