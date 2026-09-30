@@ -22,3 +22,9 @@ it("does not discard eligible results when Gemini audit is rate limited",async()
  const h=new SearchHarness({SEARCH_TIMEOUT_MS:1500} as any,writer,[provider("exa",calls,true)] as any,new MemoryStore(),{fetcher:async()=>({ok:false,text:async()=>""}) as any});
  const out:any=await h.search(request(1));expect(out.results).toHaveLength(1);expect(out.limitations).toEqual(expect.arrayContaining([expect.stringContaining("Gemini correctness audit unavailable")]));
 });
+
+it("repairs when retained candidates are all uncertain, not just failed",async()=>{
+ const calls:string[]=[];const writer:any=new HeuristicMandateWriter();writer.audit=async(_r:any,_m:any,items:any[])=>items.map(x=>({url:x.url,state:x.provider==="exa"?"uncertain":"pass",reason:"test"}));
+ const h=new SearchHarness({SEARCH_TIMEOUT_MS:1000} as any,writer,[provider("exa",calls,true),provider("tavily",calls,true)] as any,new MemoryStore(),{health:new ProviderHealth(),fetcher:(async()=>({ok:false})) as any});
+ const out:any=await h.search(request(3));expect(calls.length).toBeGreaterThan(1);expect(out.route.length).toBeLessThanOrEqual(3);
+});
