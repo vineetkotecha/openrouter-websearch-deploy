@@ -38,7 +38,8 @@ export async function extractSurvivors(input: ProviderResult[], signal?: AbortSi
       const support = fa.score;
       const title = x.title && x.title !== x.url ? x.title : (body.split("\n").find(l => l.trim())?.replace(/^title:\s*/i, "").slice(0, 200) ?? x.url);
       let fields = o.fields?.length ? {...fillFields(o.fields.filter(f=>!["product_price_inr","ram_gb"].includes(f)),body),...(o.fields.includes("product_price_inr")||o.fields.includes("ram_gb")?productFields(body):{})} : undefined;
-      if(o.schema&&o.contextReader){
+      if(o.schema&&!o.contextReader){fields=Object.fromEntries(o.schema.map(f=>[f.key,{state:'missing' as const,value:null}]));}
+      else if(o.schema&&o.contextReader){
         report.fact_calls++;try{const raw=await o.contextReader(body,{url:x.url,title},o.schema);const entities=normalizeEntities(raw,x,body,o.schema);if(entities.length){report.entities+=entities.length;return entities;}fields=normalizeContextFacts(raw,body,o.schema);}catch{report.fact_errors++;fields=Object.fromEntries(o.schema.map(f=>[f.key,{state:'missing' as const,value:null}]));}
       }else if(o.vertical&&o.factReader){
         const keys=decisiveFields(o.vertical);report.fact_calls++;
