@@ -2,13 +2,13 @@ import {canonicalContextKey} from './context-pull.js';
 export type DecisionGroup={key:string;members:string[];role:'eligibility'|'capability'|'physical_fit'|'presentation'|'meaning'|'purchase_confidence'|'routine'|'other';distinct_effect:string;member_effects?:{key:string;answer_sought:string;consequence:string;effect_class?:'functional'|'psychological';independent:boolean;why:string}[]};
 // The model identifies equivalent answers; the validator checks coverage and makes
 // that grouping operational. It does not guess equivalence from key substrings.
-export function decisionGroups(raw:unknown,keys:string[],required=false,requireEffects=false,contextual=false):DecisionGroup[]{
+export function decisionGroups(raw:unknown,keys:string[],required=false,requireEffects=false):DecisionGroup[]{
  if(raw===undefined&&!required)return [];
  if(!Array.isArray(raw)||!raw.length)throw new Error('decision_groups required');
  const seen=new Set<string>(),ids=new Set<string>();const roles=['eligibility','capability','physical_fit','presentation','meaning','purchase_confidence','routine','other'];
  const groups:DecisionGroup[]=raw.map((x:any)=>{
   if(!x||typeof x.key!=='string'||!/^[a-z][a-z0-9_]{0,63}$/.test(x.key)||!roles.includes(x.role)||typeof x.distinct_effect!=='string'||!x.distinct_effect.trim()||!Array.isArray(x.members)||!x.members.length)throw new Error('invalid decision_groups shape');
-  let key=contextual?x.key:canonicalContextKey(x.key);
+  let key=canonicalContextKey(x.key);
   const members=x.members.map((m:unknown)=>{if(typeof m!=='string'||!keys.includes(m))throw new Error('unknown decision_groups member');if(seen.has(m))throw new Error('duplicate decision_groups member');seen.add(m);return m;});
   let member_effects:DecisionGroup['member_effects'];
   if(requireEffects||x.member_effects!==undefined){
@@ -23,8 +23,8 @@ export function decisionGroups(raw:unknown,keys:string[],required=false,requireE
   }
   const independent=member_effects?.some(e=>e.independent)??false;
   if(independent){
-   if(key!==(contextual?members[0]:canonicalContextKey(members[0])))throw new Error('decision_groups preserve independent consequence in its own slot');
-  }else if(!contextual){
+   if(key!==canonicalContextKey(members[0]))throw new Error('decision_groups preserve independent consequence in its own slot');
+  }else{
    const family=({presentation:'social_image_fit',purchase_confidence:'buying_comfort',routine:'usage_pattern'} as Record<string,string>)[x.role];
    if(family)key=family;
   }
@@ -34,6 +34,6 @@ export function decisionGroups(raw:unknown,keys:string[],required=false,requireE
  if(keys.some(k=>!seen.has(k)))throw new Error('decision_groups incomplete coverage');
  // One presentation comparison per group; more require an actually different role,
  // not multiple keys for style, recognition and brand image.
- if(!contextual)for(const role of ['presentation','purchase_confidence','routine','meaning'])if(groups.filter(g=>g.role===role&&!g.member_effects?.some(e=>e.independent)).length>1)throw new Error(`overlapping decision_groups role ${role}`);
+ for(const role of ['presentation','purchase_confidence','routine','meaning'])if(groups.filter(g=>g.role===role&&!g.member_effects?.some(e=>e.independent)).length>1)throw new Error(`overlapping decision_groups role ${role}`);
  return groups;
 }
