@@ -1,6 +1,6 @@
 import {it,expect} from 'vitest';
 import {SearchRequestSchema} from '../src/contracts/search.js';
-import {normalizeIntentFormation} from '../src/core/intent-formation.js';
+import {normalizeIntentFormation,fallbackIntentFormation} from '../src/core/intent-formation.js';
 import {curateParameters} from '../src/core/parameter-curation.js';
 import {validateModelParameters} from '../src/core/architecture.js';
 const r=SearchRequestSchema.parse({tenant_id:'t',query:'laptop for coding',context:[{key:'brand_familiarity',class:'psychological',value:'prefer brands I know',source:'human',confidence:1,evidence:[{source:'human',reference:'user reply'}]}]});
@@ -114,7 +114,7 @@ it('merges model price spelling with a sourced numeric ceiling without weakening
 
 it('preserves independent durability semantics regardless of product key spelling',()=>{
  const q=SearchRequestSchema.parse({tenant_id:'t',query:'watch under 100000 INR'}),i=normalizeIntentFormation({answer_unit:'product',unknowns:[{key:'surface_choice',question:'Which surface?',why:'Appearance and durability under daily wear',result_changing:false}],candidate_human_factors:[{key:'social_image_fit',question:'Any visual preference?',why:'Optional look'}]},q),b=curateParameters(q,undefined,undefined,i);
- const raw={parameters:[{key:'search_object',class:'functional',query_reference:'watch',why:'Object',weight_percent:10,compulsory:false},{key:'social_image_fit',class:'psychological',why:'Look',weight_percent:90,compulsory:false}],decision_groups:[{key:'search_object',members:['search_object'],role:'eligibility',distinct_effect:'Object'},{key:'price_max_inr',members:['price_max_inr'],role:'eligibility',distinct_effect:'Budget'},{key:'social_image_fit',members:['social_image_fit','surface_choice'],role:'presentation',distinct_effect:'Appearance',member_effects:[{key:'social_image_fit',answer_sought:'Look',consequence:'Visual fit',independent:false,why:'Same comparison'},{key:'surface_choice',answer_sought:'Surface',consequence:'Durability',independent:true,why:'Durability is not appearance'}]}]};
+ const raw={parameters:[{key:'search_object',class:'functional',query_reference:'watch',why:'Object',weight_percent:10,compulsory:false},{key:'social_image_fit',class:'psychological',why:'Look',weight_percent:90,compulsory:false}],decision_groups:[{key:'search_object',members:['search_object'],role:'eligibility',distinct_effect:'Object'},{key:'price_max_inr',members:['price_max_inr'],role:'eligibility',distinct_effect:'Budget'},{key:'social_image_fit',members:['social_image_fit','surface_choice'],role:'presentation',distinct_effect:'Appearance',member_effects:[{key:'social_image_fit',answer_sought:'Look',effect_class:'psychological' as const,consequence:'Visual fit',independent:false,why:'Same comparison'},{key:'surface_choice',answer_sought:'Surface',consequence:'Durability',independent:true,why:'Durability is not appearance'}]}]};
  expect(()=>validateModelParameters(raw,q,i,b,true)).toThrow('independent consequence');
  raw.decision_groups[2]!.members=['social_image_fit'];raw.decision_groups[2]!.member_effects=raw.decision_groups[2]!.member_effects?.slice(0,1);raw.decision_groups.push({key:'surface_choice',members:['surface_choice'],role:'capability',distinct_effect:'Durability independently of appearance',member_effects:[{key:'surface_choice',answer_sought:'Surface',consequence:'Durability',independent:true,why:'Independent property'}]});
  const m=validateModelParameters(raw,q,i,b,true);expect(m.parameters.find(p=>p.key==='surface_choice')).toMatchObject({class:'functional',state:'missing',question:'Which surface?'});
@@ -123,17 +123,17 @@ it('preserves independent durability semantics regardless of product key spellin
 it('protects independent consequences across domains without matching domain words or keys',async()=>{
  const {decisionGroups}=await import('../src/core/decision-groups.js');
  for(const consequence of ['Makes quiet conversation possible','Avoids unwanted observation','Allows walking access','Avoids unacceptable hazard','Allows an eater to use the result','Resists wear']){
-  const group={key:'social_image_fit',members:['vibe','axis_z'],role:'presentation',distinct_effect:'Look',member_effects:[{key:'vibe',answer_sought:'Look',consequence:'Visual fit',independent:false,why:'Same answer'},{key:'axis_z',answer_sought:'Distinct need',consequence,independent:true,why:'Separate answer changes viability'}]};
+  const group={key:'social_image_fit',members:['vibe','axis_z'],role:'presentation',distinct_effect:'Look',member_effects:[{key:'vibe',answer_sought:'Look',effect_class:'psychological' as const,consequence:'Visual fit',independent:false,why:'Same answer'},{key:'axis_z',answer_sought:'Distinct need',effect_class:'functional' as const,consequence,independent:true,why:'Separate answer changes viability'}]};
   expect(()=>decisionGroups([group],['vibe','axis_z'],true,true)).toThrow('independent consequence');
   group.members=['vibe'];group.member_effects=group.member_effects.slice(0,1);
-  expect(()=>decisionGroups([group,{key:'axis_z',members:['axis_z'],role:'capability',distinct_effect:consequence,member_effects:[{key:'axis_z',answer_sought:'Distinct need',consequence,independent:true,why:'Preserved separately'}]}],['vibe','axis_z'],true,true)).not.toThrow();
+  expect(()=>decisionGroups([group,{key:'axis_z',members:['axis_z'],role:'capability',distinct_effect:consequence,member_effects:[{key:'axis_z',answer_sought:'Distinct need',effect_class:'functional' as const,consequence,independent:true,why:'Preserved separately'}]}],['vibe','axis_z'],true,true)).not.toThrow();
  }
  expect(()=>decisionGroups([{key:'search_object',members:['search_object'],role:'eligibility',distinct_effect:'Item'}],['search_object'],true,true)).toThrow('member effects');
 });
 
 it('normalizes equivalent family names by role but preserves independently consequential singleton names',async()=>{
  const {decisionGroups}=await import('../src/core/decision-groups.js');
- const effect=(key:string,independent=false)=>({key,answer_sought:'Answer',consequence:'Choice changes',independent,why:independent?'Separate answer needed':'Same answer preserves this effect'});
+ const effect=(key:string,independent=false)=>({key,answer_sought:'Answer',effect_class:'psychological' as const,consequence:'Choice changes',independent,why:independent?'Separate answer needed':'Same answer preserves this effect'});
  const groups=decisionGroups([
   {key:'venue_vibe',members:['vibe'],role:'presentation',distinct_effect:'Appearance',member_effects:[effect('vibe')]},
   {key:'formality',members:['formality'],role:'presentation',distinct_effect:'Dress and service expectation',member_effects:[effect('formality',true)]},
@@ -143,4 +143,15 @@ it('normalizes equivalent family names by role but preserves independently conse
  expect(()=>decisionGroups([{key:'renamed',members:['formality'],role:'presentation',distinct_effect:'Expectation',member_effects:[effect('formality',true)]}],['formality'],true,true)).toThrow('independent consequence');
  expect(()=>decisionGroups([{key:'vibe',members:['vibe','formality'],role:'presentation',distinct_effect:'Appearance',member_effects:[effect('vibe'),effect('formality',true)]}],['vibe','formality'],true,true)).toThrow('independent consequence');
  expect(()=>decisionGroups([{key:'vibe',members:['vibe'],role:'presentation',distinct_effect:'Appearance',member_effects:[effect('vibe')]},{key:'look',members:['look'],role:'presentation',distinct_effect:'Appearance',member_effects:[effect('look')]}],['vibe','look'],true,true)).toThrow('duplicate');
+});
+
+it('classifies declared functional consequences independently of routine role and opaque spelling',async()=>{
+ const q=SearchRequestSchema.parse({tenant_id:'t',query:'laptop'}),i=fallbackIntentFormation(q),b=curateParameters(q,undefined,undefined,i);
+ const raw={parameters:[{key:'search_object',class:'functional',why:'Object',query_reference:'laptop',weight_percent:0,compulsory:false},{key:'axis_z',class:'psychological',why:'Physical comfort at the input mechanism',weight_percent:50,compulsory:false},{key:'keyboard_trackpad_quality',class:'psychological',why:'Ergonomics',weight_percent:50,compulsory:false}],decision_groups:[
+  {key:'search_object',members:['search_object'],role:'eligibility',distinct_effect:'Object',member_effects:[{key:'search_object',answer_sought:'Object',consequence:'Product category',effect_class:'functional',independent:true,why:'Exact object'}]},
+  ...['axis_z','keyboard_trackpad_quality'].map(key=>({key,members:[key],role:'routine',distinct_effect:'Physical comfort',member_effects:[{key,answer_sought:'Input requirements',consequence:'Physical comfort and productivity',effect_class:'functional',independent:true,why:'Requirement independent of workflow context'}]}))
+ ]};
+ const m=validateModelParameters(raw,q,i,b,true,true);
+ expect(m.parameters.filter(p=>p.key!=='search_object').every(p=>p.class==='functional')).toBe(true);
+ const {parameterPrompt}=await import('../src/core/architecture.js');expect(parameterPrompt(q,i)).toContain('must not duplicate a physical mobility');
 });

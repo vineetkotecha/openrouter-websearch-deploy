@@ -1,5 +1,5 @@
 import {canonicalContextKey} from './context-pull.js';
-export type DecisionGroup={key:string;members:string[];role:'eligibility'|'capability'|'physical_fit'|'presentation'|'meaning'|'purchase_confidence'|'routine'|'other';distinct_effect:string;member_effects?:{key:string;answer_sought:string;consequence:string;independent:boolean;why:string}[]};
+export type DecisionGroup={key:string;members:string[];role:'eligibility'|'capability'|'physical_fit'|'presentation'|'meaning'|'purchase_confidence'|'routine'|'other';distinct_effect:string;member_effects?:{key:string;answer_sought:string;consequence:string;effect_class?:'functional'|'psychological';independent:boolean;why:string}[]};
 // The model identifies equivalent answers; the validator checks coverage and makes
 // that grouping operational. It does not guess equivalence from key substrings.
 export function decisionGroups(raw:unknown,keys:string[],required=false,requireEffects=false):DecisionGroup[]{
@@ -15,7 +15,9 @@ export function decisionGroups(raw:unknown,keys:string[],required=false,requireE
    if(!Array.isArray(x.member_effects)||x.member_effects.length!==members.length)throw new Error('decision_groups member effects incomplete');
    const checked=new Set<string>();member_effects=x.member_effects.map((e:any)=>{
     if(!e||!members.includes(e.key)||checked.has(e.key)||typeof e.independent!=='boolean'||['answer_sought','consequence','why'].some(k=>typeof e[k]!=='string'||!e[k].trim()))throw new Error('decision_groups invalid member effect');
-    checked.add(e.key);return {key:e.key,answer_sought:e.answer_sought.slice(0,300),consequence:e.consequence.slice(0,500),independent:e.independent,why:e.why.slice(0,500)};
+    if(requireEffects&&!['functional','psychological'].includes(e.effect_class))throw new Error('decision_groups member effect class required');
+    if(e.effect_class!==undefined&&!['functional','psychological'].includes(e.effect_class))throw new Error('decision_groups invalid effect class');
+    checked.add(e.key);return {key:e.key,effect_class:e.effect_class,answer_sought:e.answer_sought.slice(0,300),consequence:e.consequence.slice(0,500),independent:e.independent,why:e.why.slice(0,500)};
    });
    if(members.length>1&&member_effects?.some(e=>e.independent))throw new Error('decision_groups preserve independent consequence in its own slot');
   }
