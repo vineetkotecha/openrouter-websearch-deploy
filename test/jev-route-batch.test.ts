@@ -7,9 +7,9 @@ import {HeuristicMandateWriter} from '../src/core/mandate.js';
 afterEach(()=>{delete process.env.TYPESAFE_API_KEY;calls.count=0;calls.keys=[];calls.state=null;calls.fail=false});
 it('selects providers separately for two subqueries in one bounded Jev call',async()=>{
  process.env.TYPESAFE_API_KEY='test';const r=SearchRequestSchema.parse({tenant_id:'t',query:'find company news and filings'}),m=await new HeuristicMandateWriter().write(r);
- const jobs=[{id:'news',query:'company news',candidates:[{provider:'exa'},{provider:'serper'}]},{id:'filings',query:'company filings',candidates:[{provider:'serper'},{provider:'valyu'}]}];
+ const jobs=[{id:'news',query:'company news',candidates:[{provider:'exa',learned:{runs:7,vertical:'web',direct:12}},{provider:'serper'}]},{id:'filings',query:'company filings',candidates:[{provider:'serper'},{provider:'valyu'}]}];
  const decisions=await routeSubqueries(r,m,jobs);
- expect(calls.count).toBe(1);expect(calls.keys).toEqual(['count_0','provider_0_0','provider_0_1','count_1','provider_1_0','provider_1_1']);expect(calls.state.subqueries.map((x:any)=>x.query)).toEqual(['company news','company filings']);expect(decisions.map(x=>x.selected)).toEqual(['serper','valyu']);
+ expect(calls.count).toBe(1);expect(calls.state.subqueries[0].available_providers[0].earned_capability).toEqual({runs:7,vertical:'web',direct:12});expect(calls.keys).toEqual(['count_0','provider_0_0','provider_0_1','count_1','provider_1_0','provider_1_1']);expect(calls.state.subqueries.map((x:any)=>x.query)).toEqual(['company news','company filings']);expect(decisions.map(x=>x.selected)).toEqual(['serper','valyu']);
 });
 it('falls back when Jev fails and skips a singleton eligible route',async()=>{
  process.env.TYPESAFE_API_KEY='test';calls.fail=true;const r=SearchRequestSchema.parse({tenant_id:'t',query:'test'}),m=await new HeuristicMandateWriter().write(r);

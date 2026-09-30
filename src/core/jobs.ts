@@ -1,3 +1,4 @@
+import type {CapabilitySummary} from '../learning/provider-capabilities.js';
 // Mandate -> search jobs -> routed provider calls.
 // Implements the job planner: 11-class taxonomy, ladders A-F with an escalation rule,
 // staged cost/token gates, primary-then-fallback sequencing, known-URL/site shortcuts,
@@ -43,13 +44,6 @@ export const CAPABILITIES: Record<string, Capability> = {
   you: { classes: ["keyword_web", "news_fresh", "grounded_answer"], kinds: ["discovery"], cost: .35, latency: .75, freshness: .8, structure: .3, token_load: .3 },
   apify: { classes: ["local_shopping_maps", "site_map_crawl"], kinds: ["discovery", "crawl"], cost: .5, latency: .3, freshness: .8, structure: .7, token_load: .5 },
   diffbot: { classes: ["entity_kg", "structured_json"], kinds: ["structured"], cost: .6, latency: .6, freshness: .5, structure: 1, token_load: .3 },
-};
-
-// Cohort primaries per class (playbook section 7). A small bonus, not a hard rule.
-const COHORT_PRIMARY: Partial<Record<QueryClass, string[]>> = {
-  semantic_discovery: ["exa"], keyword_web: ["tavily", "brave"], news_fresh: ["tavily", "brave"], local_shopping_maps: ["serper"],
-  site_extract: ["firecrawl"], site_map_crawl: ["firecrawl"], structured_json: ["linkup"], entity_kg: ["diffbot"],
-  premium_domain: ["valyu"], deep_research: ["parallel"], grounded_answer: ["perplexity", "parallel"],
 };
 
 // Ladder for each class.
@@ -175,9 +169,10 @@ export class ProviderHealth {
   }
 }
 
-export type ScoredCandidate = { provider: string; score: number; terms: Record<string, number>; excluded?: string };
+export type ScoredCandidate = { provider: string; score: number; terms: Record<string, number>; learned?:CapabilitySummary; excluded?: string };
 
-// score = fit + freshness + structure - cost - token_load - latency_penalty - recent_errors
+// Static capability priors score eligibility; earned, tenant-local retrieval feedback
+// subsequently adjusts the actual served plan. No provider-name cohort bonus.
 // hard fail when disabled, out of quota, blocked by policy, or no capability for the job.
 export function scoreCandidates(kind: JobKind, c: Classification, r: SearchRequest, providers: SearchProvider[], health: ProviderHealth): ScoredCandidate[] {
   const allow = new Set(r.provider_allowlist ?? []);
@@ -188,7 +183,7 @@ export function scoreCandidates(kind: JobKind, c: Classification, r: SearchReque
   for (const name of names) {
     const cap = CAPABILITIES[name] ?? { classes: ["keyword_web"], kinds: ["discovery"], cost: .5, latency: .5, freshness: .5, structure: .3, token_load: .4 } as Capability;
     const p = byName.get(name);
-    const fit = cap.classes.includes(c.query_class) ? 1 : cap.classes.includes("keyword_web") && kind === "discovery" ? .4 : 0;
+    const fit = cap.classes.includes(c.query_class) ? 1 : cap.classes.includes("keyword_web") && kind === "discovery" ? .7 : 0;
     const terms = {
       fit: +(fit * .5).toFixed(3),
       freshness: +(cap.freshness * c.freshness_need * .15).toFixed(3),
@@ -197,7 +192,7 @@ export function scoreCandidates(kind: JobKind, c: Classification, r: SearchReque
       token_load: +(cap.token_load * .08).toFixed(3),
       latency: +((1 - cap.latency) * .05).toFixed(3),
       recent_errors: +(health.recentErrors(name) * .3).toFixed(3),
-      cohort: (COHORT_PRIMARY[c.query_class] ?? []).includes(name) ? .06 : 0,
+      cohort: 0,
     };
     const score = +(terms.fit + terms.cohort + terms.freshness + terms.structure - terms.cost - terms.token_load - terms.latency - terms.recent_errors).toFixed(3);
     let excluded: string | undefined;

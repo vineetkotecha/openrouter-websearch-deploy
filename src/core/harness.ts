@@ -1,3 +1,5 @@
+import {gradeProvider,providerVertical,summarizeCapabilities,matchCapability,type CapabilityObservation} from '../learning/provider-capabilities.js';
+import {BENCHMARK_SEED} from '../learning/provider-seed.js';
 import {namedProductQuery} from "./product-repair.js";
 import {invokeProvider} from "../providers/invoke.js";
 import { nineStageTrace, type TraceEvent } from "./trace.js";
@@ -19,8 +21,8 @@ import type { LlmJudge } from "./faithfulness.js";
 import {requiredSearchArea,requiredQueryTerms,purposeTerms,validatedFinalQuery} from "./final-query.js";import { routeSubqueries } from "./jev-router.js";
 import { executePlan, planJobs, ProviderHealth, type PlannedJob } from "./jobs.js";
 
-export interface EpisodeStore { save(x: { id: string; tenantId: string; request: SearchRequest; response: SearchResponse; mandate?: unknown; expiresAt: Date; principal?: unknown; surface?: string; startedAt?: number }): Promise<void>; outcome(x: unknown): Promise<void> }
-export class MemoryStore implements EpisodeStore { episodes = new Map<string, unknown>(); async save(x: any) { this.episodes.set(x.id, x) } async outcome(x: unknown) { this.episodes.set(randomUUID(), x) } }
+export interface EpisodeStore { capabilityObservations?(tenantId:string):Promise<CapabilityObservation[]>; save(x: { id: string; tenantId: string; request: SearchRequest; response: SearchResponse; mandate?: unknown; expiresAt: Date; principal?: unknown; surface?: string; startedAt?: number }): Promise<void>; outcome(x: unknown): Promise<void> }
+export class MemoryStore implements EpisodeStore { episodes = new Map<string, unknown>(); async save(x: any) { this.episodes.set(x.id, x) } async outcome(x: unknown) { this.episodes.set(randomUUID(), x) } async capabilityObservations(tenantId:string){return [...this.episodes.values()].filter((x:any)=>x.tenantId===tenantId&&x.request?.permissions?.may_learn&&x.expiresAt>Date.now()).flatMap((x:any)=>x.response?.plan?.provider_feedback??[])} }
 
 export type HarnessOptions = { fetcher?: typeof fetch; health?: ProviderHealth; judge?: LlmJudge };
 // One clarifying question, asked only when the caller allows it and a pending store is wired.
@@ -151,6 +153,12 @@ export class SearchHarness {
       }else plan.notes.push("Ambiguous category: no discovery-capable job; category branches were not searched.");
     }
     for(const job of plan.jobs)job.query=validatedFinalQuery(job.query,finalQuery,requiredArea,requiredTerms);
+    let prior:CapabilityObservation[]=[];
+    if(request.permissions.may_learn&&this.store.capabilityObservations)try{prior=await this.store.capabilityObservations(request.tenant_id)}catch{plan.notes.push('Provider feedback store unavailable; using explicit benchmark seed and unmeasured priors.')}
+    const earnedMap=summarizeCapabilities([...BENCHMARK_SEED,...prior]);
+    const enrich=(jobs:PlannedJob[])=>{for(const job of jobs){for(const c of job.candidates){const earned=matchCapability(earnedMap,c.provider,job.query_class,intent.answer_unit??'general',job.kind,providerVertical(c.provider,{...effective,query:job.query??finalQuery},finalMandate,job.search_vertical));c.learned=earned;if(earned){c.terms.learned=+earned.adjustment.toFixed(4);c.score+=c.terms.learned;}}job.candidates.sort((a,b)=>Number(!!a.excluded)-Number(!!b.excluded)||b.score-a.score);job.primary=job.candidates.find(c=>!c.excluded)?.provider;job.fallback=job.candidates.find(c=>!c.excluded&&c.provider!==job.primary)?.provider;}};
+    enrich(plan.jobs);
+    record('7_provider_capability_map',{version:1,scope:'public-benchmark-seed+tenant-local',observed:earnedMap,unmeasured_prior:'playbook capability profiles; not earned evidence'});
     const decisions=await routeSubqueries(effective,finalMandate,plan.jobs.map(j=>({id:j.id,query:j.query!,candidates:j.candidates})));
     for(const [i,job] of plan.jobs.entries()){
       const decision=decisions[i]!;
@@ -163,6 +171,7 @@ export class SearchHarness {
     const deadline = Math.min(this.c.SEARCH_TIMEOUT_MS, request.limits.latency_ms);
 
     const providerRequest={...effective,query:finalQuery};
+    const observedRuns:{provider:string;job:PlannedJob;status:string;latency_ms:number;results:ProviderResult[]}[]=[];
     const call = async (p: SearchProvider, job: PlannedJob) => {
       const s = Date.now();
       const base={...providerRequest,query:job.query??providerRequest.query};
@@ -171,8 +180,8 @@ export class SearchHarness {
         : base;
       try {
         const results = await invokeProvider(p,{request:req,mandate:finalMandate,search_vertical:job.search_vertical},deadline,request.limits.latency_ms);
-        return { status: "ok", latency_ms: Date.now() - s, results };
-      } catch (e) { return { status: e instanceof Error ? e.message : "error", latency_ms: Date.now() - s, results: [] as ProviderResult[] }; }
+        const run={status:"ok",latency_ms:Date.now()-s,results};observedRuns.push({provider:p.name,job,...run});return run;
+      } catch (e) {const run={status:e instanceof Error?e.message:"error",latency_ms:Date.now()-s,results:[] as ProviderResult[]};observedRuns.push({provider:p.name,job,...run});return run;}
 
     };
     const grade = (xs: ProviderResult[]) => { const gate=gateResults(effective,finalMandate,xs,intent.answer_unit);const top=rank(finalMandate,gate.retained.map(x=>x.result),3);const score=top.length?top.reduce((a,x)=>a+x.mandate_fit,0)/top.length:0;record("6_provider_grade",{input_count:xs.length,eligible_count:gate.retained.length,excluded:gate.excluded,top:top.map(x=>({url:x.url,mandate_fit:x.mandate_fit})),score});return score; };
@@ -197,6 +206,7 @@ export class SearchHarness {
       const failedProviders=new Set(exec.runs.map(x=>x.provider));
       const modelQuery=intent.answer_unit==="product"?namedProductQuery(pool,finalQuery):undefined;
       const repairs=plan.jobs.map(j=>({...j,...(modelQuery?{query:modelQuery,search_vertical:"web" as const}:{}),candidates:j.candidates.map(c=>({...c,excluded:modelQuery?(c.excluded??(!["tavily","you","exa","jina","serper","serpapi","parallel"].includes(c.provider)?"no web model-resolution capability":undefined)):c.excluded??(failedProviders.has(c.provider)?"already fired":undefined)}))})).filter(j=>j.candidates.some(c=>!c.excluded));
+      enrich(repairs);
       const repairDecisions=await routeSubqueries({...effective,limits:{...effective.limits,max_provider_calls:1}},finalMandate,repairs.map(j=>({id:j.id,query:j.query??finalQuery,candidates:j.candidates})));
       const repair=repairs.map((j,i)=>({job:j,provider:repairDecisions[i]?.selected??j.candidates.find(c=>!c.excluded)?.provider,policy:repairDecisions[i]?.policy})).find(x=>x.provider&&this.providers.some(p=>p.name===x.provider&&p.enabled()));
       record('7_repair_route',{remaining_budget:request.limits.max_provider_calls-exec.runs.length,decision:repair?{job:repair.job.id,provider:repair.provider,policy:repair.policy,query:repair.job.query,search_vertical:repair.job.search_vertical}:null});
@@ -263,6 +273,8 @@ export class SearchHarness {
     const reranked=await jevRerank(effective,finalMandate,eligibleForJev);
     if(reranked.reason!=="reranked")limitations.push(`Jev rerank not completed: ${reranked.reason}.`);
     record('10_jev_rerank',reranked);
+    const providerFeedback=observedRuns.map(run=>gradeProvider({provider:run.provider,query_class:run.job.query_class,answer_unit:intent.answer_unit,kind:run.job.kind,vertical:providerVertical(run.provider,{...effective,query:run.job.query??finalQuery},finalMandate,run.job.search_vertical),status:run.status,latency_ms:run.latency_ms,results:run.results.map(x=>extractedByUrl.get(x.url)??x),request:effective,mandate:finalMandate,fields:intent.answer_unit==='product'?['product_price_inr','ram_gb']:plan.classification.structured_fields}));
+    record('6_provider_feedback',{version:1,runs:providerFeedback,grade:'retrieval proxy; not user outcome',persistence:request.permissions.may_retain&&request.permissions.may_learn?'tenant-local episode':'not persisted for learning'});
     const response: SearchResponse = {
       status: "complete", episode_id,
       results: reranked.results.filter(x=>allowed.has(x.url)).slice(0,5).map(x=>({...x,verification:verification.get(x.url)??{},citations:[{url:x.url,claim:x.title,support:x.faithfulness.state,kind:"source_claim" as const}]})),
@@ -276,7 +288,7 @@ export class SearchHarness {
       },
       retention_until: request.permissions.may_retain ? new Date(Date.now() + 30 * 864e5).toISOString() : undefined,
       plan: {
-        version: 1, query_class: plan.classification.query_class, ladder: plan.classification.ladder, signals: plan.classification.signals,
+        provider_feedback:providerFeedback, version: 1, query_class: plan.classification.query_class, ladder: plan.classification.ladder, signals: plan.classification.signals,
         budget: plan.budget, jobs: plan.jobs.map(j => ({ id: j.id, kind: j.kind, query:j.query, routing_policy:j.routing_policy, primary: j.primary, fallback: j.fallback, reason: j.reason, priority:j.priority, factor_keys:j.factor_keys, candidates: j.candidates })),
         runs: [...exec.runs,...repairRuns], fallback_used: exec.fallback_used, escalated: exec.escalated, skipped: exec.skipped,
         known_urls: plan.classification.known_urls, extraction: report, context: contextUsed(effective), curation:curated, eligibility:{excluded:[...earlyGate.excluded,...lateGate.excluded],retained:allowed.size,audit}, formation:{first:firstPass.formed_query,post:finalQuery,revision_of:request.curation_revision_of,used_keys:formed.context_keys}, gaps: finalMandate.gaps.map(g => ({ key: g.key, material: g.material })), fill: plan.classification.structured_fields.length ? fillSummary(plan.classification.structured_fields, extracted.map(x => (x as any).fields)) : undefined, notes: [...plan.notes,...fillDecision.defaults.map(x=>`default:${x.key} - ${x.reason}`),`jev_rerank: ${reranked.successful}/${reranked.attempted}; ${reranked.reason}; ${reranked.latency_ms} ms; tokens ${reranked.usage.input_tokens}/${reranked.usage.output_tokens}`],
@@ -287,7 +299,7 @@ export class SearchHarness {
     // Storage must never fail a search: record the failure and still return results.
     let stored=false;
     if (request.permissions.may_retain) await Promise.resolve().then(() => this.store.save({ id: episode_id, tenantId: request.tenant_id, request, response, mandate: finalMandate, principal: meta?.principal, surface: meta?.surface, startedAt, expiresAt: new Date(Date.now() + 30 * 864e5) })).then(()=>{stored=true}).catch(e => { console.error("episode save failed", String((e as Error)?.message ?? e).slice(0, 200)); response.limitations.push("History and usage were not recorded for this search."); });
-    record('12_decision_learning',{episode_id,storage:stored?'retained':'not_retained',outcome:'not_submitted',may_learn:request.permissions.may_learn,learning_update:stored&&request.permissions.may_learn?'awaiting_explicit_outcome':'not_run',reason:stored&&request.permissions.may_learn?'An outcome event will derive and store a tenant-local learning example.':stored?'Learning not permitted.':'No stored episode for a later outcome; no learning update.'});
+    record('12_decision_learning',{episode_id,storage:stored?'retained':'not_retained',outcome:'not_submitted',may_learn:request.permissions.may_learn,provider_feedback_update:stored&&request.permissions.may_learn?'recorded_tenant_local':'not_persisted',learning_update:stored&&request.permissions.may_learn?'awaiting_explicit_outcome':'not_run',reason:stored&&request.permissions.may_learn?'An outcome event will derive and store a tenant-local learning example.':stored?'Learning not permitted.':'No stored episode for a later outcome; no learning update.'});
     return response;
   }
 }

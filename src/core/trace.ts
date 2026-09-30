@@ -30,7 +30,7 @@ export function nineStageTrace(events:TraceEvent[], status:string) {
     {heading:TRACE_HEADINGS[5],data:value(mandate)},
     {heading:TRACE_HEADINGS[6],data:value(updated)},
     {heading:TRACE_HEADINGS[7],data:plan?{jobs:plan.jobs.map((j:any)=>({id:j.id,kind:j.kind,query:j.query,reason:j.reason,factor_keys:j.factor_keys})),notes:plan.notes,budget:plan.budget}:null},
-    {heading:TRACE_HEADINGS[8],data:plan?{routes:all('7_subquery_route'),repair_routes:all('7_repair_route'),jobs:plan.jobs.map((j:any)=>({id:j.id,query:j.query,primary:j.primary,fallback:j.fallback,candidates:j.candidates})),grades:all('6_provider_grade'),execution:first('6_provider_execution'),audits:all('6_result_audit'),eligibility:first('7_triage_and_dedupe'),rerank:first('10_jev_rerank')}:null}
+    {heading:TRACE_HEADINGS[8],data:plan?{routes:all('7_subquery_route'),repair_routes:all('7_repair_route'),jobs:plan.jobs.map((j:any)=>({id:j.id,query:j.query,primary:j.primary,fallback:j.fallback,candidates:j.candidates})),capability_map:first('7_provider_capability_map'),feedback:first('6_provider_feedback'),grades:all('6_provider_grade'),execution:first('6_provider_execution'),audits:all('6_result_audit'),eligibility:first('7_triage_and_dedupe'),rerank:first('10_jev_rerank')}:null}
   ];
   return {version:1,status,sections:sections.map(s=>({...s,available:s.data!==null})),events:events.map(({stage,elapsed_ms})=>({stage,elapsed_ms}))};
 }

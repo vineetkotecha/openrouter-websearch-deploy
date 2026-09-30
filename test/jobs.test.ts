@@ -66,7 +66,7 @@ describe("job planner and execution", () => {
     const calls: string[] = [];
     const r = req("startups similar to Linear"); const m = await writer.write(r);
     const providers = [fake("exa", () => [], calls), fake("tavily", () => res("tavily", 4, "startups similar linear"), calls)];
-    const plan = planJobs(r, m, providers);
+    const plan = planJobs(r, m, providers, new ProviderHealth(), "exa");
     expect(plan.jobs[0]!.primary).toBe("exa");
     const call = async (p: any) => ({ status: "ok", latency_ms: 1, results: await p.search() });
     const out = await executePlan(plan, providers, call, xs => xs.length ? .9 : 0, new ProviderHealth());
@@ -77,7 +77,7 @@ describe("job planner and execution", () => {
     const calls: string[] = [];
     const r = req("startups similar to Linear"); const m = await writer.write(r);
     const providers = [fake("exa", () => res("exa", 4), calls), fake("tavily", () => res("tavily", 4), calls)];
-    const plan = planJobs(r, m, providers);
+    const plan = planJobs(r, m, providers, new ProviderHealth(), "exa");
     const call = async (p: any) => ({ status: "ok", latency_ms: 1, results: await p.search() });
     await executePlan(plan, providers, call, () => .9, new ProviderHealth());
     expect(calls).toEqual(["exa"]);
