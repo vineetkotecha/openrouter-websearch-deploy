@@ -1,3 +1,5 @@
+import {normalizeContextFacts} from './context-facts.js';
+import type {DecisiveFact} from './fact-schema.js';
 import {normalizeEntities} from './entities.js';
 import {decisiveFields,normalizeDecisiveFacts,type FactReader,type FactVertical} from './decisive-facts.js';
 import {productFields} from "./product-fields.js";
@@ -7,7 +9,7 @@ import { gradeDeterministic, gradeWithLlm, type LlmJudge } from "./faithfulness.
 
 const privateHost = /^(localhost|127\.|10\.|192\.168\.|169\.254\.|0\.|\[::1\])/;
 
-export type ExtractOptions = { max?: number; maxChars?: number; tokenBudget?: number; fetcher?: typeof fetch; judge?: LlmJudge; timeoutMs?: number; fields?: string[]; vertical?:FactVertical; factReader?:FactReader };
+export type ExtractOptions = { max?: number; maxChars?: number; tokenBudget?: number; fetcher?: typeof fetch; judge?: LlmJudge; timeoutMs?: number; schema?:DecisiveFact[]; contextReader?:(page:string,identity:{url:string;title:string},schema:DecisiveFact[])=>Promise<unknown>; fields?: string[]; vertical?:FactVertical; factReader?:FactReader };
 export type ExtractReport = { attempted: number; extracted: number; chars: number; tokens_est: number; skipped_budget: number; failed_http: number; failed_fetch: number; supported: number; partial: number; unverified: number; fact_calls:number; fact_errors:number; entities:number };
 
 // Extract only the survivors of discovery triage, within an extract cap and a token budget.
@@ -36,7 +38,9 @@ export async function extractSurvivors(input: ProviderResult[], signal?: AbortSi
       const support = fa.score;
       const title = x.title && x.title !== x.url ? x.title : (body.split("\n").find(l => l.trim())?.replace(/^title:\s*/i, "").slice(0, 200) ?? x.url);
       let fields = o.fields?.length ? {...fillFields(o.fields.filter(f=>!["product_price_inr","ram_gb"].includes(f)),body),...(o.fields.includes("product_price_inr")||o.fields.includes("ram_gb")?productFields(body):{})} : undefined;
-      if(o.vertical&&o.factReader){
+      if(o.schema&&o.contextReader){
+        report.fact_calls++;try{const raw=await o.contextReader(body,{url:x.url,title},o.schema);const entities=normalizeEntities(raw,x,body,o.schema);if(entities.length){report.entities+=entities.length;return entities;}fields=normalizeContextFacts(raw,body,o.schema);}catch{report.fact_errors++;fields=Object.fromEntries(o.schema.map(f=>[f.key,{state:'missing' as const,value:null}]));}
+      }else if(o.vertical&&o.factReader){
         const keys=decisiveFields(o.vertical);report.fact_calls++;
         try{const raw=await o.factReader(o.vertical,body,{url:x.url,title},keys);const entities=normalizeEntities(raw,x,body,o.vertical);if(entities.length){report.entities+=entities.length;return entities;}const facts=normalizeDecisiveFacts(raw,o.vertical,body,keys);fields={...fields,...facts};}
         catch{report.fact_errors++;fields={...fields,...Object.fromEntries(keys.map(k=>[k,{value:null,state:'missing' as const}]))};}
