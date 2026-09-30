@@ -8,7 +8,7 @@ const r=SearchRequestSchema.parse({tenant_id:'t',query:'Find a perfect date plac
 const intent=normalizeIntentFormation({answer_unit:'local_business',answer_forms:[{kind:'cafe',why:'lunch'},{kind:'restaurant',why:'lunch'},{kind:'other lunch experience',why:'date'}]},r);
 it('keeps one user intent while widening possible date-lunch answer forms',()=>{
  const prompt=intentFormationPrompt(r);
- expect(prompt).toContain('answer_forms');expect(prompt).toContain('One decision');expect(prompt).toContain('several acceptable answer forms');
+ expect(prompt).toContain('answer_forms');expect(prompt).toContain('one intent');expect(prompt).toContain('Do not declare that a restaurant is required');
  expect(intent.answer_unit).toBe('local_business');expect(intent.strategy).toBe('focused');expect(intent.answer_forms).toHaveLength(3);
  const final=finalQueryPrompt(r,intent,curateParameters(r,undefined,undefined,intent),'date lunch in Bengaluru');
  expect(final).toContain('other lunch experience');expect(final).toContain('Do not narrow to restaurants');
