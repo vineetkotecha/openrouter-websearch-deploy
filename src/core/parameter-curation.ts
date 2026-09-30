@@ -33,6 +33,7 @@ export function curateParameters(r: SearchRequest, m?: Mandate, revision_of?: st
   const now = Date.now();
   const slots = new Map<string, CuratedParameter>();
   const put = (p: Omit<CuratedParameter,"criticality"|"compulsory">) => slots.set(`${p.class}:${p.key}`, {...p,criticality:p.material?80:p.effect==="ranking"?10:40,compulsory:p.material});
+  put({key:"search_object",class:"functional",value:r.query,state:"resolved",source:"query",evidence:[{source:"query",reference:r.query}],confidence:1,allowed_uses:["search","rerank"],hard:false,material:false,priority:20,effect:"retrieval"});
   for (const [raw, value] of Object.entries(r.hard_constraints)) {
     const key=canonicalContextKey(raw);
     put({key,class:"functional",value,state:"resolved",source:"query",evidence:[{source:"query",reference:`hard_constraints.${raw}`}],confidence:1,allowed_uses:["search","rerank"],hard:true,material:true,priority:100,effect:"eligibility"});

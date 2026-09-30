@@ -21,7 +21,7 @@ export function validateModelParameters(raw:unknown,r:SearchRequest,intent:Inten
  for(const candidate of proposals){
   if(!candidate||typeof candidate!=="object")throw new Error("invalid parameter");
   const p={...candidate} as ProposedParameter;
-  if(p.class==="psychological"&&/(?:screen_size|battery_life|storage|ram|operating_system|microphone_quality|sound_quality|portability|comfort_level)/.test(p.key))p.class="functional";
+  if(p.class==="psychological"&&/(?:screen_size|battery_life|storage|ram|budget|price|performance_priority|operating_system|microphone_quality|sound_quality|portability|comfort_level)/.test(p.key))p.class="functional";
   if(/^(?:budget|budget_range|price_max|price_limit_inr)$/.test(p.key)&&baseline.parameters.some(b=>b.key==="price_max_inr"&&b.hard))p.key="price_max_inr";
   const key=typeof p.key==="string"?canonicalContextKey(p.key):"";
   if(key==="search_object"&&(!p.query_reference||!r.query.toLowerCase().includes(p.query_reference.toLowerCase())))throw new Error("search_object needs an exact query phrase");
@@ -36,7 +36,7 @@ export function validateModelParameters(raw:unknown,r:SearchRequest,intent:Inten
   const fresh=candidates.filter(c=>!c.expires_at||Date.parse(c.expires_at)>Date.now()).filter(c=>key!=="location"||!c.observed_at||Date.now()-Date.parse(c.observed_at)<15*60_000)
    .filter(c=>p.class!=="psychological"||(c.source!=="query"&&c.evidence?.some(e=>e.source===c.source&&e.reference)));
   const valid=fresh.filter(c=>usable(c.value));
-  const baselineResolved=baseline.parameters.find(b=>b.key===key&&b.class===p.class&&b.state==="resolved"&&b.source==="query");
+  const baselineResolved=key==="search_object"?undefined:baseline.parameters.find(b=>b.key===key&&b.class===p.class&&b.state==="resolved"&&b.source==="query");
   const values:{value:unknown;source:"query"|"caller"|"human"|"prior_outcome";evidence:{source:string;reference?:string}[];confidence:number;observed_at?:string;expires_at?:string;allowed_uses?: ("search"|"rerank"|"ask")[]}[]=explicit?[{value:explicit[1],source:"query" as const,evidence:[{source:"query",reference:`hard_constraints.${explicit[0]}`}],confidence:1}]:baselineResolved?[{value:baselineResolved.value,source:"query" as const,evidence:baselineResolved.evidence,confidence:1}]:valid.map(c=>({value:c.value,source:c.source,evidence:c.evidence?.map(e=>({source:e.source,reference:e.reference}))??[],confidence:c.confidence,observed_at:c.observed_at,expires_at:c.expires_at,allowed_uses:c.allowed_uses}));
   const conflict=values.length>1&&values.some(c=>!same(c.value,values[0]!.value));
   const phrase=typeof p.query_reference==="string"&&p.query_reference.trim()&&r.query.toLowerCase().includes(p.query_reference.toLowerCase())?p.query_reference:undefined;

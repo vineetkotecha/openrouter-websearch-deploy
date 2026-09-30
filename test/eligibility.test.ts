@@ -70,3 +70,4 @@ it('excludes a manufacturer category root but keeps its individual model URL',()
  expect(eligibility(r,m,x('https://www.lenovo.com/in/en/laptops/','Laptops for Business, Gaming, Students | Lenovo India'),'product').eligible).toBe(false);
  expect(eligibility(r,m,x('https://www.lenovo.com/in/en/p/laptops/ideapad/slim3/len101','IdeaPad Slim 3 Gen 8'),'product').eligible).toBe(true);
 });
+it('excludes a laptop series category with no individual SKU',()=>{const r=SearchRequestSchema.parse({query:'Best laptop with 16GB RAM under 80000 INR',tenant_id:'t'});expect(eligibility(r,m,x('https://store.acer.com/en-in/laptops/aspire/aspire-lite','Aspire Lite - Laptops'),'product').eligible).toBe(false)});

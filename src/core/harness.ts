@@ -214,6 +214,7 @@ export class SearchHarness {
     const ordered = triaged.map(t => byCanon.get(t.url)!).filter(Boolean);
     const known_first = [...ordered.filter(x => x.provider === "known_url"), ...ordered.filter(x => x.provider !== "known_url")];
     record('7_triage_and_dedupe',{pool_count:pool.length,eligibility:{retained:earlyGate.retained.length,excluded:earlyGate.excluded},audit,triaged:triaged.map(x=>({rank:x.rank,url:x.url,title:x.title,mandate_fit:x.mandate_fit,faithfulness:x.faithfulness})),ordered_urls:known_first.map(x=>x.url)});
+    if(intent.answer_unit==="product")known_first.sort((a,b)=>Number(/\/(?:dp|product|p)\//i.test(b.url))-Number(/\/(?:dp|product|p)\//i.test(a.url)));
     const { results: extracted, report } = await extractSurvivors(known_first, undefined, { max: Math.max(plan.budget.max_extracts, known.length ? Math.min(known.length, 5) : 0), maxChars: plan.budget.max_extract_chars, tokenBudget: plan.budget.token_budget, fetcher: this.opts.fetcher, judge: this.opts.judge , fields: intent.answer_unit==="product"?[...new Set([...plan.classification.structured_fields,"product_price_inr","ram_gb"])]:plan.classification.structured_fields});
     const rest = eligiblePool.filter(x => !known_first.includes(x));
     record('8_extraction',{report,extracted:extracted.map(x=>({provider:x.provider,url:x.url,title:x.title,fields:x.fields})),untriaged_count:rest.length});
