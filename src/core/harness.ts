@@ -229,7 +229,7 @@ export class SearchHarness {
     const known_first = [...ordered.filter(x => x.provider === "known_url"), ...ordered.filter(x => x.provider !== "known_url")];
     record('7_triage_and_dedupe',{pool_count:pool.length,eligibility:{retained:earlyGate.retained.length,excluded:earlyGate.excluded},audit,triaged:triaged.map(x=>({rank:x.rank,url:x.url,title:x.title,mandate_fit:x.mandate_fit,faithfulness:x.faithfulness})),ordered_urls:known_first.map(x=>x.url)});
     if(intent.answer_unit==="product")known_first.sort((a,b)=>Number(/\/(?:dp|product|p)\//i.test(b.url))-Number(/\/(?:dp|product|p)\//i.test(a.url)));
-    const { results: extracted, report } = await extractSurvivors(known_first, undefined, { max: Math.max(plan.budget.max_extracts, known.length ? Math.min(known.length, 5) : 0), maxChars: plan.budget.max_extract_chars, tokenBudget: plan.budget.token_budget, fetcher: this.opts.fetcher, judge: this.opts.judge , fields: intent.answer_unit==="product"?[...new Set([...plan.classification.structured_fields,"product_price_inr","ram_gb"])]:plan.classification.structured_fields});
+    const { results: extracted, report } = await extractSurvivors(known_first, undefined, { max: Math.max(plan.budget.max_extracts, known.length ? Math.min(known.length, 5) : 0), maxChars: plan.budget.max_extract_chars, tokenBudget: plan.budget.token_budget, fetcher: this.opts.fetcher, judge: this.opts.judge, vertical:intent.answer_unit==='product'||intent.answer_unit==='local_business'?intent.answer_unit:undefined, factReader:this.writer.readFacts?.bind(this.writer), fields: intent.answer_unit==="product"?[...new Set([...plan.classification.structured_fields,"product_price_inr","ram_gb"])]:plan.classification.structured_fields});
     const rest = eligiblePool.filter(x => !known_first.includes(x));
     record('8_extraction',{report,extracted:extracted.map(x=>({provider:x.provider,url:x.url,title:x.title,fields:x.fields})),untriaged_count:rest.length});
 
@@ -251,6 +251,7 @@ export class SearchHarness {
     for (const n of plan.notes) if (/no .* provider live/i.test(n)) limitations.push(n);
     if(hotelPropertySearch(effective))limitations.push("Hotel date-specific prices, room availability and discounts remain unverified unless backed by a dated booking quote.");
     if(report.failed_fetch)limitations.push(`${report.failed_fetch} of ${report.attempted} source pages could not be fetched; their claims were not verified.`);
+    if(report.fact_errors)limitations.push(`${report.fact_errors} decisive-fact reads failed; their fields remain missing.`);
     if(report.unverified)limitations.push(`${report.unverified} extracted sources remained unverified.`);
     if(/\b(?:Jain|without onion|without garlic|no onion|no garlic)\b/i.test(request.query))limitations.push('Ingredient lists and preparation were not independently checked for Jain or onion/garlic restrictions; verify the full recipe before use.');
     if(/\bpeer.reviewed\b/i.test(request.query))limitations.push('Peer-review status was not checked against a journal or proceedings record; repository pages alone do not prove it.');

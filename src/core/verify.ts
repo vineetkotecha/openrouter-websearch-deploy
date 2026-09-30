@@ -1,3 +1,4 @@
+import {decisiveFields,normalizeDecisiveFacts,type FactReader,type FactVertical} from './decisive-facts.js';
 import {productFields} from "./product-fields.js";
 import { fillFields } from "./fill.js";
 import type { ProviderResult } from "../contracts/search.js";
@@ -5,14 +6,14 @@ import { gradeDeterministic, gradeWithLlm, type LlmJudge } from "./faithfulness.
 
 const privateHost = /^(localhost|127\.|10\.|192\.168\.|169\.254\.|0\.|\[::1\])/;
 
-export type ExtractOptions = { max?: number; maxChars?: number; tokenBudget?: number; fetcher?: typeof fetch; judge?: LlmJudge; timeoutMs?: number; fields?: string[] };
-export type ExtractReport = { attempted: number; extracted: number; chars: number; tokens_est: number; skipped_budget: number; failed_http: number; failed_fetch: number; supported: number; partial: number; unverified: number };
+export type ExtractOptions = { max?: number; maxChars?: number; tokenBudget?: number; fetcher?: typeof fetch; judge?: LlmJudge; timeoutMs?: number; fields?: string[]; vertical?:FactVertical; factReader?:FactReader };
+export type ExtractReport = { attempted: number; extracted: number; chars: number; tokens_est: number; skipped_budget: number; failed_http: number; failed_fetch: number; supported: number; partial: number; unverified: number; fact_calls:number; fact_errors:number };
 
 // Extract only the survivors of discovery triage, within an extract cap and a token budget.
 // Pages are truncated to maxChars before any scoring so full pages never blow the grader.
 export async function extractSurvivors(input: ProviderResult[], signal?: AbortSignal, o: ExtractOptions = {}): Promise<{ results: ProviderResult[]; report: ExtractReport }> {
   const max = o.max ?? 3, maxChars = o.maxChars ?? 8000, budgetChars = (o.tokenBudget ?? 6000) * 4, f = o.fetcher ?? fetch;
-  const report: ExtractReport = { attempted: 0, extracted: 0, chars: 0, tokens_est: 0, skipped_budget: 0, failed_http: 0, failed_fetch: 0, supported: 0, partial: 0, unverified: 0 };
+  const report: ExtractReport = { attempted: 0, extracted: 0, chars: 0, tokens_est: 0, skipped_budget: 0, failed_http: 0, failed_fetch: 0, supported: 0, partial: 0, unverified: 0, fact_calls:0, fact_errors:0 };
   const targets = input.slice(0, max);
   // Allocate before concurrent reads; every page gets a bounded share.
   const pageChars = Math.min(maxChars, Math.floor(budgetChars / Math.max(1, targets.length)));
@@ -33,7 +34,12 @@ export async function extractSurvivors(input: ProviderResult[], signal?: AbortSi
       report[fa.state]++;
       const support = fa.score;
       const title = x.title && x.title !== x.url ? x.title : (body.split("\n").find(l => l.trim())?.replace(/^title:\s*/i, "").slice(0, 200) ?? x.url);
-      const fields = o.fields?.length ? {...fillFields(o.fields.filter(f=>!["product_price_inr","ram_gb"].includes(f)),body),...(o.fields.includes("product_price_inr")||o.fields.includes("ram_gb")?productFields(body):{})} : undefined;
+      let fields = o.fields?.length ? {...fillFields(o.fields.filter(f=>!["product_price_inr","ram_gb"].includes(f)),body),...(o.fields.includes("product_price_inr")||o.fields.includes("ram_gb")?productFields(body):{})} : undefined;
+      if(o.vertical&&o.factReader){
+        const keys=decisiveFields(o.vertical);report.fact_calls++;
+        try{const facts=normalizeDecisiveFacts(await o.factReader(o.vertical,body,{url:x.url,title},keys),o.vertical,body,keys);fields={...fields,...facts};}
+        catch{report.fact_errors++;fields={...fields,...Object.fromEntries(keys.map(k=>[k,{value:null,state:'missing' as const}]))};}
+      }
       return { ...x, ...(fields ? { fields } : {}), title, snippet: x.snippet || body.slice(0, 400), raw: { ...(typeof x.raw === "object" && x.raw ? x.raw : {}), verified_content: true, support: Number(support.toFixed(3)), faithfulness: fa, passage: body.slice(0, 1200), retrieved_at: new Date().toISOString() } };
     } catch { report.failed_fetch++; return x; }
   }));

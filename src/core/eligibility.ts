@@ -42,7 +42,7 @@ export function eligibility(r:SearchRequest,m:Mandate,x:ProviderResult,answerUni
  }
  // Only source-supported, typed fields can exclude an item. Snippet numbers and
  // model assertions never become verified prices, ratings, inventory or dates.
- const cap=explicitBudget(r),price=supportedField(x,/^(?:dated_offer_total_inr|stay_total_inr|product_price_inr|price_inr)$/);
+ const cap=explicitBudget(r),price=supportedField(x,/^(?:dated_offer_total_inr|stay_total_inr|product_price_inr|price_for_two_inr|price_inr)$/);
  const priceApplicable=price&&(strategy?.unit==='hotel_property'?/^(?:dated_offer_total_inr|stay_total_inr)$/.test(price[0]):true);
  verification.price={status:priceApplicable?'verified':'unverified',...(priceApplicable?{evidence:`${price[0]}: ${String(price[1].value)}`}:{})};
  if(cap!==null&&priceApplicable&&amount(price[1].value)!==null&&amount(price[1].value)!>cap)reasons.push(`verified price ${String(price[1].value)} exceeds budget ${cap}`);
