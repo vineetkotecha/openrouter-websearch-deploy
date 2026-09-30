@@ -20,7 +20,7 @@ describe("new adapters behind enabled()", () => {
     expect(await new Linkup().search(ctx)).toEqual([{ provider: "linkup", url: "https://b.example.com", title: "B", snippet: "bee" }]);
     process.env.YDC_API_KEY = "k"; mock({ results: { web: [{ url: "https://c.example.com", title: "C", snippets: ["sea"] }], news: [{ url: "https://n.example.com", title: "N", description: "news" }] } });
     const y = await new YouSearch().search(ctx); expect(y.map(x => x.url)).toEqual(["https://c.example.com", "https://n.example.com"]); expect(y[1]!.snippet).toBe("news");
-    expect(seen.at(-1).url).toMatch(/^https:\/\/ydc-index\.io\/v1\/search\?query=/);
+    expect(seen.at(-1).url).toMatch(/^https:\/\/api\.you\.com\/v1\/search\?query=/);
     process.env.DIFFBOT_TOKEN = "k"; mock({ search_results: [{ pageUrl: "https://d.example.com", title: "D", content: "dee", score: .9 }] });
     expect(await new DiffbotSearch().search(ctx)).toEqual([{ provider: "diffbot", url: "https://d.example.com", title: "D", snippet: "dee", score: .9 }]);
   });
