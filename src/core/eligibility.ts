@@ -3,7 +3,7 @@ import {answerStrategy,type AnswerUnit} from './answer-units.js';
 
 export type Verification={status:'verified'|'unverified';evidence?:string};
 export type Eligibility={eligible:boolean;reasons:string[];verification:Record<string,Verification>};
-const listingPath=/(?:list-of-|\/listings?\/|\/search(?:[/?]|$)|\/s\/|\/stays\/|\/hotels-(?:in|near)-|\/hotels\/[^/?]+(?:[/?]|$))/i;
+const listingPath=/(?:list-of-|\/listings?\/|\/search(?:[/?]|$)|\/s(?:[/?]|$)|\/stays\/|\/hotels-(?:in|near)-|\/hotels\/[^/?]+(?:[/?]|$))/i;
 const collectionTitle=/\b(?:best|budget|cheap|top|list of|hotels|products|items|stores|people)\b.*\b(?:hotels?|products?|items?|near|in)\b/i;
 const hotelName=/\b(?:hotel|fabhotel|treebo|oyo|collection o|olive zip|xotel|residency|inn|suites|rooms|stay)\b/i;
 const productCollectionTitle=/\b(?:best|top|cheap|budget|list of|deals? on|buy|shop)\b.*\b(?:laptops?|phones?|shoes?|chargers?|headphones?|earbuds?|jackets?|toys?)\b|\b(?:laptops?|phones?|shoes?|chargers?|headphones?|earbuds?|jackets?|toys?)\b.*\b(?:under|collection|list|deals?|on sale|compare|202[0-9])\b/i;

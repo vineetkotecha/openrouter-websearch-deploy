@@ -1,3 +1,4 @@
+import {HeuristicMandateWriter} from "../src/core/mandate.js";
 import {describe,it,expect} from 'vitest';
 import {SearchRequestSchema} from '../src/contracts/search.js';
 import {eligibility,gateResults} from '../src/core/eligibility.js';
@@ -57,4 +58,10 @@ it('requires a provider publication date for an explicitly bounded fresh news qu
  const old={...undated,published_at:new Date(Date.now()-14*864e5).toISOString()};expect(eligibility(q,m,old).eligible).toBe(false);
  const fresh={...undated,published_at:new Date(Date.now()-864e5).toISOString()};expect(eligibility(q,m,fresh).eligible).toBe(true);
  const latestOnly=SearchRequestSchema.parse({...q,query:'latest mission launch'});expect(eligibility(latestOnly,m,undated).eligible).toBe(false);
+});
+it('excludes merchant search collections even when the title is just the merchant name',async()=>{
+ const r=SearchRequestSchema.parse({query:'Best laptop with 16GB RAM for coding under 80000 INR',tenant_id:'t'});
+ const m=await new HeuristicMandateWriter().write(r);
+ const x={provider:'tavily',url:'https://www.amazon.in/Laptops/s?rh=n%3A1375424031',title:'Amazon.in',snippet:'Laptops under 80000'};
+ expect(eligibility(r,m,x,'product').eligible).toBe(false);
 });
