@@ -35,7 +35,7 @@ export function decisionGroups(raw:unknown,keys:string[],required=false,requireE
   if(ids.has(key))throw new Error('duplicate decision_groups key');ids.add(key);
   return {key,members,role:x.role,distinct_effect:x.distinct_effect.trim().slice(0,500),member_effects};
  });
- const missing=keys.filter(k=>!seen.has(k));if(missing.length)throw new Error('decision_groups incomplete coverage: '+missing.join(', '));
+ if(keys.some(k=>!seen.has(k)))throw new Error('decision_groups incomplete coverage');
  // One presentation comparison per group; more require an actually different role,
  // not multiple keys for style, recognition and brand image.
  if(!contextual)for(const role of ['presentation','purchase_confidence','routine','meaning'])if(groups.filter(g=>g.role===role&&!g.member_effects?.some(e=>e.independent)).length>1)throw new Error(`overlapping decision_groups role ${role}`);
