@@ -20,3 +20,21 @@ it('requires consideration, not a forced factor: relevant families form valueles
  const raw={answer_unit:'product',human_factor_considerations:[{family:'social_image_fit',relevant:true,why:'Used in shared work settings where desired look may change fit',question:'What look would feel right in your work setting?',value:'high status'},{family:'buying_comfort',relevant:true,why:'Purchase commitment with alternatives',question:'What would help you feel comfortable choosing one?'},{family:'usage_pattern',relevant:false,why:'Already enough factual use requirements for this lookup'}]};
  expect(()=>validateHumanFactorConsiderations(raw)).not.toThrow();const i=normalizeIntentFormation(raw,r);expect(i.candidate_human_factors.map(x=>x.key)).toEqual(['social_image_fit','buying_comfort']);expect(i.candidate_human_factors.every(x=>!('value' in x))).toBe(true);expect(i.human_factor_considerations).toHaveLength(3);expect(()=>validateHumanFactorConsiderations({human_factor_considerations:[]})).toThrow('consideration');
 });
+
+it('preserves relevant image and usage slots through both safety gates without treating age substrings as demographics',()=>{
+ const i=normalizeIntentFormation({answer_unit:'product',human_factor_considerations:[
+  {family:'social_image_fit',relevant:true,why:'Desired look may change choice among laptops',question:'What look feels right?'},
+  {family:'buying_comfort',relevant:true,why:'Purchase confidence affects brand choice',question:'What would make choosing comfortable?'},
+  {family:'usage_pattern',relevant:true,why:'Coding routine may change choice',question:'Where do you normally code?'}],
+  candidate_human_factors:[{key:'age_group',question:'Age group?',why:'Demographic'}]},r);
+ const b=curateParameters(r,undefined,undefined,i);
+ const m=validateModelParameters({parameters:[{key:'search_object',class:'functional',why:'Item sought',query_reference:'laptop',weight_percent:95,compulsory:false},{key:'age',class:'psychological',why:'Demographic',weight_percent:5,compulsory:false}]},r,i,b);
+ for(const key of ['social_image_fit','buying_comfort','usage_pattern']){
+  expect(b.parameters.find(p=>p.key===key)).toMatchObject({class:'psychological',state:'missing'});
+  expect(m.parameters.find(p=>p.key===key)).toMatchObject({class:'psychological',state:'missing',compulsory:false});
+  expect(m.parameters.find(p=>p.key===key)?.value).toBeUndefined();
+ }
+ expect(b.parameters.some(p=>p.key==='age_group')).toBe(false);
+ expect(m.parameters.some(p=>p.key==='age')).toBe(false);
+ expect(m.parameters.reduce((sum,p)=>sum+p.priority,0)).toBeCloseTo(100);
+});

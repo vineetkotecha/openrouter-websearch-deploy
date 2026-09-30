@@ -27,7 +27,7 @@ const humanOnly = (c: SearchRequest["context"][number]) => c.class === "psycholo
 // where different answers could reverse which eligible option wins.
 const openChoice=(r:SearchRequest)=>/\b(?:best|recommend|choose|pick|which)\b/i.test(r.query)&&!r.category_hint;
 const hotelChoice=(r:SearchRequest)=>openChoice(r)&&/\b(?:hotels?|stays?|lodg(?:ing|es?))\b/i.test(r.query);
-const sensitive = (key:string) => /(?:religion|race|ethnic|gender|sexual|disability|health|medical|politic|age|income|credit|biometric)/i.test(key);
+const sensitive = (key:string) => /(?:religion|race|ethnic|gender|sexual|disability|health|medical|politic|(?:^|_)age(?:_|$)|income|credit|biometric)/i.test(key);
 // A direct quote or caller's own understanding with a reference is required for a human factor.
 // A query alone, an unreferenced profile, or a model hypothesis cannot create one.
 export function curateParameters(r: SearchRequest, m?: Mandate, revision_of?: string, intent?:IntentFormation): CuratedParameterManifest {

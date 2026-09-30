@@ -7,7 +7,7 @@ import type { CuratedParameterManifest, CuratedParameter } from "./parameter-cur
 export type ProposedParameter = {key:string;class:"functional"|"psychological";why:string;weight_percent:number;compulsory:boolean;hard?:boolean;effect?:"eligibility"|"retrieval"|"ranking";question?:string;query_reference?:string};
 export type ModelManifest = CuratedParameterManifest & {generation:"gemini"|"fallback";weight_total_percent:100;fallback_reason?:string};
 const keyPattern=/^[a-z][a-z0-9_]{0,63}$/;
-const restricted=/(?:religion|race|ethnic|gender|sexual|disability|health|medical|politic|age|income|credit|biometric)/i;
+const restricted=/(?:religion|race|ethnic|gender|sexual|disability|health|medical|politic|(?:^|_)age(?:_|$)|income|credit|biometric)/i;
 const usable=(x:unknown)=>x!==undefined&&x!==null&&String(x).trim()!=="";
 const same=(x:unknown,y:unknown)=>JSON.stringify(x)===JSON.stringify(y);
 const uses=(c:SearchRequest["context"][number])=>c.allowed_uses?.length?c.allowed_uses:["search","rerank","ask"] as ("search"|"rerank"|"ask")[];
