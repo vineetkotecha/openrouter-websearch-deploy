@@ -59,3 +59,16 @@ describe("Vertex slow response budget", () => {
     } finally { spy.mockRestore(); }
   });
 });
+
+describe("Vertex capacity recovery",()=>{
+ it("backs off and retries 429 on the same pinned model and region",async()=>{
+  const urls:string[]=[],delays:number[]=[];let generations=0;
+  const fetcher=(async(url:string)=>{urls.push(url);if(url.includes("oauth2"))return new Response(JSON.stringify({access_token:"t",expires_in:3600}));generations++;return generations<3?new Response(JSON.stringify({error:{message:"Resource exhausted"}}),{status:429}):new Response(JSON.stringify({candidates:[{content:{parts:[{text:'{"ok":true}'}]}}]}));}) as unknown as typeof fetch;
+  const v=new VertexClient(saJson,"us-central1",fetcher,async ms=>{delays.push(ms)});
+  expect(await v.generate("gemini-2.5-flash","hi")).toBe('{"ok":true}');expect(generations).toBe(3);expect(delays).toHaveLength(2);expect(delays[0]).toBeGreaterThanOrEqual(1000);expect(delays[1]).toBeGreaterThanOrEqual(2000);expect(new Set(urls.filter(u=>u.includes("aiplatform"))).size).toBe(1);
+ });
+ it("stops after three failed capacity attempts",async()=>{
+  let count=0;const fetcher=(async(url:string)=>url.includes("oauth2")?new Response(JSON.stringify({access_token:"t",expires_in:3600})):(count++,new Response(JSON.stringify({error:{message:"Resource exhausted"}}),{status:429}))) as unknown as typeof fetch;
+  await expect(new VertexClient(saJson,"us-central1",fetcher,async()=>{}).generate("gemini-2.5-flash","hi")).rejects.toThrow(/429/);expect(count).toBe(3);
+ });
+});

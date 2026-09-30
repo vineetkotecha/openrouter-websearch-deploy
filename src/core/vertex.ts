@@ -25,7 +25,7 @@ export class VertexClient {
   private workingModel?: string;
   private workingLocation?: string;
   readonly sa: ServiceAccount;
-  constructor(raw: string, private location = "us-central1", private fetcher: typeof fetch = fetch) { this.sa = parseServiceAccount(raw); }
+  constructor(raw: string, private location = "us-central1", private fetcher: typeof fetch = fetch, private pause: (ms:number)=>Promise<void> = ms=>new Promise(resolve=>setTimeout(resolve,ms))) { this.sa = parseServiceAccount(raw); }
 
   async accessToken(): Promise<string> {
     if (this.token && Date.now() < this.token.exp - 60_000) return this.token.value;
@@ -60,7 +60,13 @@ export class VertexClient {
 
   // Never silently change model or data location: these are user-owned choices.
   async generate(pinned: string, prompt: string, temperature?: number): Promise<string> {
-    const out = await this.call(pinned, this.location, prompt, temperature);
+    let out: string | undefined;
+    for(let attempt=0;attempt<3;attempt++){
+      try{out=await this.call(pinned,this.location,prompt,temperature);break}
+      catch(error){if(attempt===2||! /\[(429|500|502|503|504)\]/.test(String((error as Error)?.message??error)))throw error;
+        await this.pause(Math.min(4000,1000*2**attempt)+Math.floor(Math.random()*250));}
+    }
+    if(out===undefined)throw new Error("Vertex retry exhausted");
     this.workingModel = pinned;
     this.workingLocation = this.location;
     return out;

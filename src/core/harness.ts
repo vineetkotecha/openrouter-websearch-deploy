@@ -1,3 +1,4 @@
+import {invokeProvider} from "../providers/invoke.js";
 import { nineStageTrace, type TraceEvent } from "./trace.js";
 import { randomUUID } from "node:crypto";
 import { fallbackManifest, type ModelManifest, type AuditVerdict } from "./architecture.js";
@@ -156,18 +157,16 @@ export class SearchHarness {
 
     const providerRequest={...effective,query:finalQuery};
     const call = async (p: SearchProvider, job: PlannedJob) => {
-      const ctl = new AbortController(), s = Date.now();
-      const providerDeadline = p.name === "serpapi" ? Math.min(deadline, 6000) : deadline;
-      const t = setTimeout(() => ctl.abort(), providerDeadline);
+      const s = Date.now();
       const base={...providerRequest,query:job.query??providerRequest.query};
       const req = job.id === "site_search" && plan.classification.domains.length
         ? { ...base, hard_constraints: { ...base.hard_constraints, include_domains: plan.classification.domains } }
         : base;
       try {
-        const results = await Promise.race([p.search({ request: req, mandate: finalMandate, signal: ctl.signal }), new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`${p.name} deadline exceeded`)), providerDeadline + 250))]);
+        const results = await invokeProvider(p,{request:req,mandate:finalMandate},deadline,request.limits.latency_ms);
         return { status: "ok", latency_ms: Date.now() - s, results };
       } catch (e) { return { status: e instanceof Error ? e.message : "error", latency_ms: Date.now() - s, results: [] as ProviderResult[] }; }
-      finally { clearTimeout(t); }
+
     };
     const grade = (xs: ProviderResult[]) => { const gate=gateResults(effective,finalMandate,xs,intent.answer_unit);const top=rank(finalMandate,gate.retained.map(x=>x.result),3);const score=top.length?top.reduce((a,x)=>a+x.mandate_fit,0)/top.length:0;record("6_provider_grade",{input_count:xs.length,eligible_count:gate.retained.length,excluded:gate.excluded,top:top.map(x=>({url:x.url,mandate_fit:x.mandate_fit})),score});return score; };
     const exec = await executePlan(plan, this.providers, call, grade, this.health);
