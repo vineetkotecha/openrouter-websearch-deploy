@@ -23,6 +23,7 @@ export function decisionGroups(raw:unknown,keys:string[],required=false,requireE
   }
   const independent=member_effects?.some(e=>e.independent)??false;
   if(independent){
+   if(contextual&&members.length===1)key=members[0];
    if(key!==(contextual?members[0]:canonicalContextKey(members[0])))throw new Error('decision_groups preserve independent consequence in its own slot');
   }else if(!contextual){
    const family=({presentation:'social_image_fit',purchase_confidence:'buying_comfort',routine:'usage_pattern'} as Record<string,string>)[x.role];
