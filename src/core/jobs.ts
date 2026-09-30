@@ -230,6 +230,7 @@ export type PlannedJob = {
   query?: string;
   routing_policy?: string;
   selected_providers?: string[];
+  search_vertical?: "web";
 };
 
 export type JobPlan = { version: 1; classification: Classification; budget: Budget; max_provider_calls: number; jobs: PlannedJob[]; notes: string[] };

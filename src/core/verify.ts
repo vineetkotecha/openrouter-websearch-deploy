@@ -1,3 +1,4 @@
+import {productFields} from "./product-fields.js";
 import { fillFields } from "./fill.js";
 import type { ProviderResult } from "../contracts/search.js";
 import { gradeDeterministic, gradeWithLlm, type LlmJudge } from "./faithfulness.js";
@@ -30,7 +31,7 @@ export async function extractSurvivors(input: ProviderResult[], signal?: AbortSi
       report[fa.state]++;
       const support = fa.score;
       const title = x.title && x.title !== x.url ? x.title : (body.split("\n").find(l => l.trim())?.replace(/^title:\s*/i, "").slice(0, 200) ?? x.url);
-      const fields = o.fields?.length ? fillFields(o.fields, body) : undefined;
+      const fields = o.fields?.length ? {...fillFields(o.fields.filter(f=>!["product_price_inr","ram_gb"].includes(f)),body),...(o.fields.includes("product_price_inr")||o.fields.includes("ram_gb")?productFields(body):{})} : undefined;
       return { ...x, ...(fields ? { fields } : {}), title, snippet: x.snippet || body.slice(0, 400), raw: { ...(typeof x.raw === "object" && x.raw ? x.raw : {}), verified_content: true, support: Number(support.toFixed(3)), faithfulness: fa, passage: body.slice(0, 1200), retrieved_at: new Date().toISOString() } };
     } catch { report.failed_fetch++; return x; }
   }));

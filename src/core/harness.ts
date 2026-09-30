@@ -1,3 +1,4 @@
+import {namedProductQuery} from "./product-repair.js";
 import {invokeProvider} from "../providers/invoke.js";
 import { nineStageTrace, type TraceEvent } from "./trace.js";
 import { randomUUID } from "node:crypto";
@@ -164,7 +165,7 @@ export class SearchHarness {
         ? { ...base, hard_constraints: { ...base.hard_constraints, include_domains: plan.classification.domains } }
         : base;
       try {
-        const results = await invokeProvider(p,{request:req,mandate:finalMandate},deadline,request.limits.latency_ms);
+        const results = await invokeProvider(p,{request:req,mandate:finalMandate,search_vertical:job.search_vertical},deadline,request.limits.latency_ms);
         return { status: "ok", latency_ms: Date.now() - s, results };
       } catch (e) { return { status: e instanceof Error ? e.message : "error", latency_ms: Date.now() - s, results: [] as ProviderResult[] }; }
 
@@ -189,11 +190,12 @@ export class SearchHarness {
     const noViableCandidates=pool.length>0&&(firstGate.retained.length===0||(audit.length>0&&firstGate.retained.every(x=>!audit.some(v=>v.url===x.result.url&&v.state==="pass"))));
     if((!pool.length||noViableCandidates)&&exec.runs.length<request.limits.max_provider_calls){
       const failedProviders=new Set(exec.runs.map(x=>x.provider));
-      const repairs=plan.jobs.map(j=>({...j,candidates:j.candidates.map(c=>({...c,excluded:c.excluded??(failedProviders.has(c.provider)?"already fired":undefined)}))})).filter(j=>j.candidates.some(c=>!c.excluded));
+      const modelQuery=intent.answer_unit==="product"?namedProductQuery(pool,finalQuery):undefined;
+      const repairs=plan.jobs.map(j=>({...j,...(modelQuery?{query:modelQuery,search_vertical:"web" as const}:{}),candidates:j.candidates.map(c=>({...c,excluded:modelQuery?(c.excluded??(!["tavily","you","exa","jina","serper","serpapi","parallel"].includes(c.provider)?"no web model-resolution capability":undefined)):c.excluded??(failedProviders.has(c.provider)?"already fired":undefined)}))})).filter(j=>j.candidates.some(c=>!c.excluded));
       const repairDecisions=await routeSubqueries({...effective,limits:{...effective.limits,max_provider_calls:1}},finalMandate,repairs.map(j=>({id:j.id,query:j.query??finalQuery,candidates:j.candidates})));
       const repair=repairs.map((j,i)=>({job:j,provider:repairDecisions[i]?.selected??j.candidates.find(c=>!c.excluded)?.provider,policy:repairDecisions[i]?.policy})).find(x=>x.provider&&this.providers.some(p=>p.name===x.provider&&p.enabled()));
-      record('7_repair_route',{remaining_budget:request.limits.max_provider_calls-exec.runs.length,decision:repair?{job:repair.job.id,provider:repair.provider,policy:repair.policy}:null});
-      if(repair){const provider=this.providers.find(p=>p.name===repair.provider)!;const repairJob={...repair.job,query:intent.answer_unit==="product"?`${repair.job.query??finalQuery} individual product model specifications price`.slice(0,400):repair.job.query};const run=await call(provider,repairJob);this.health.record(provider.name,run.status==="ok",run.status);repairRuns.push({job:repair.job.id,provider:provider.name,role:"fallback",latency_ms:run.latency_ms,status:run.status,result_count:run.results.length});if(run.status==="ok"&&run.results.length){pool=[...pool,...run.results];audit=await runAudit(pool);record("6_result_audit",{phase:"after_repair",verdicts:audit});limitations.push(`One targeted repair used ${repair.provider}; no further repair calls were made.`)}else limitations.push(`One targeted repair with ${repair.provider} did not add results.`)}
+      record('7_repair_route',{remaining_budget:request.limits.max_provider_calls-exec.runs.length,decision:repair?{job:repair.job.id,provider:repair.provider,policy:repair.policy,query:repair.job.query,search_vertical:repair.job.search_vertical}:null});
+      if(repair){const provider=this.providers.find(p=>p.name===repair.provider)!;const repairJob={...repair.job,query:repair.job.search_vertical==="web"?repair.job.query:intent.answer_unit==="product"?`${repair.job.query??finalQuery} individual product model specifications price`.slice(0,400):repair.job.query};const run=await call(provider,repairJob);this.health.record(provider.name,run.status==="ok",run.status);repairRuns.push({job:repair.job.id,provider:provider.name,role:"fallback",latency_ms:run.latency_ms,status:run.status,result_count:run.results.length});if(run.status==="ok"&&run.results.length){pool=[...pool,...run.results];audit=await runAudit(pool);record("6_result_audit",{phase:"after_repair",verdicts:audit});limitations.push(`One targeted repair used ${repair.provider}; no further repair calls were made.`)}else limitations.push(`One targeted repair with ${repair.provider} did not add results.`)}
     }
     if((!pool.length||noViableCandidates)&&!repairRuns.length&&this.providers.some(p=>p.enabled()))limitations.push("No eligible alternate-provider repair was available within the call budget.");
     // Keep all retrieval records for the one final Jev pass, even model-rejected
@@ -207,7 +209,7 @@ export class SearchHarness {
     const ordered = triaged.map(t => byCanon.get(t.url)!).filter(Boolean);
     const known_first = [...ordered.filter(x => x.provider === "known_url"), ...ordered.filter(x => x.provider !== "known_url")];
     record('7_triage_and_dedupe',{pool_count:pool.length,eligibility:{retained:earlyGate.retained.length,excluded:earlyGate.excluded},audit,triaged:triaged.map(x=>({rank:x.rank,url:x.url,title:x.title,mandate_fit:x.mandate_fit,faithfulness:x.faithfulness})),ordered_urls:known_first.map(x=>x.url)});
-    const { results: extracted, report } = await extractSurvivors(known_first, undefined, { max: Math.max(plan.budget.max_extracts, known.length ? Math.min(known.length, 5) : 0), maxChars: plan.budget.max_extract_chars, tokenBudget: plan.budget.token_budget, fetcher: this.opts.fetcher, judge: this.opts.judge , fields: plan.classification.structured_fields});
+    const { results: extracted, report } = await extractSurvivors(known_first, undefined, { max: Math.max(plan.budget.max_extracts, known.length ? Math.min(known.length, 5) : 0), maxChars: plan.budget.max_extract_chars, tokenBudget: plan.budget.token_budget, fetcher: this.opts.fetcher, judge: this.opts.judge , fields: intent.answer_unit==="product"?[...new Set([...plan.classification.structured_fields,"product_price_inr","ram_gb"])]:plan.classification.structured_fields});
     const rest = eligiblePool.filter(x => !known_first.includes(x));
     record('8_extraction',{report,extracted:extracted.map(x=>({provider:x.provider,url:x.url,title:x.title,fields:x.fields})),untriaged_count:rest.length});
 
