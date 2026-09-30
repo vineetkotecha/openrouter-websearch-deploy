@@ -37,6 +37,17 @@ export function curateParameters(r: SearchRequest, m?: Mandate, revision_of?: st
     const key=canonicalContextKey(raw);
     put({key,class:"functional",value,state:"resolved",source:"query",evidence:[{source:"query",reference:`hard_constraints.${raw}`}],confidence:1,allowed_uses:["search","rerank"],hard:true,material:true,priority:100,effect:"eligibility"});
   }
+  // Explicit numeric requirements in the original query are constraints, not
+  // model preferences. Preserve them even if parameter generation drops hard.
+  const ram=r.query.match(/\b(\d+)\s*GB\s*RAM\b/i);
+  if(ram&&!/\b(?:prefer|ideally|optional)\b/i.test(r.query.slice(Math.max(0,ram.index!-25),ram.index)))
+    put({key:"ram",class:"functional",value:ram[0],state:"resolved",source:"query",evidence:[{source:"query",reference:ram[0]}],confidence:1,allowed_uses:["search","rerank"],hard:true,material:true,priority:100,effect:"eligibility"});
+  const cap=r.query.match(/\b(?:under|below|maximum|max|up to)\s*(?:₹|INR|Rs\.?\s*)?([\d,]+)\s*(?:INR|rupees|rs\.?)?/i);
+  if(cap&&(/(?:₹|INR|rupees|rs\.?)/i.test(cap[0])||intent?.answer_unit==="product"&&r.country==="IN"&&!/\b(?:kg|grams|hours|days|dollars|usd|eur|gb)\b/i.test(r.query.slice(cap.index!+cap[0].length,cap.index!+cap[0].length+15))))put({key:"price_max_inr",class:"functional",value:Number(cap[1]!.replace(/,/g,"")),state:"resolved",source:"query",evidence:[{source:"query",reference:cap[0]}],confidence:1,allowed_uses:["search","rerank"],hard:true,material:true,priority:100,effect:"eligibility"});
+  if(intent?.answer_unit==="local_business"){
+    const area=r.query.match(/\b(?:in|near|around)\s+(?!me\b|my\b|the\b)([A-Z][\p{L}\s,-]{2,80})/u);
+    if(area)put({key:"location",class:"functional",value:area[1]!.trim(),state:"resolved",source:"query",evidence:[{source:"query",reference:area[0]}],confidence:1,allowed_uses:["search","rerank"],hard:false,material:true,priority:80,effect:"retrieval"});
+  }
   const context = [...r.context].sort((a,b)=>({human:4,caller:3,query:2,prior_outcome:1}[b.source]-{human:4,caller:3,query:2,prior_outcome:1}[a.source]));
   for (const c of context) {
     const key=canonicalContextKey(c.key), cls=humanOnly(c)?"psychological":"functional";

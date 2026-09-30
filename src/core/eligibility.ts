@@ -36,7 +36,7 @@ export function eligibility(r:SearchRequest,m:Mandate,x:ProviderResult,answerUni
       /\b(?:app|platform|tool|service|AI-powered|sign up|start with|how it works)\b/i.test(x.snippet.slice(0,700)))
      reasons.push('discovery service, not an individual place to visit');
   }else if(strategy.unit==='product'){
-   if(listingPath.test(url.pathname)||productCollectionTitle.test(title))reasons.push('collection page, not an individual product');
+   if(listingPath.test(url.pathname)||/\/(?:laptops|phones|headphones|products|collections)\/?$/i.test(url.pathname)||productCollectionTitle.test(title))reasons.push('collection page, not an individual product');
   }else if(listingPath.test(url.pathname)||collectionTitle.test(title))reasons.push('collection page, not an individual answer');
   verification[strategy.unit]={status:'unverified',...(reasons.length?{}:{evidence:`entity-shaped title: ${x.title}`})};
  }

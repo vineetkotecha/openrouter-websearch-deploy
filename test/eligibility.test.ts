@@ -65,3 +65,8 @@ it('excludes merchant search collections even when the title is just the merchan
  const x={provider:'tavily',url:'https://www.amazon.in/Laptops/s?rh=n%3A1375424031',title:'Amazon.in',snippet:'Laptops under 80000'};
  expect(eligibility(r,m,x,'product').eligible).toBe(false);
 });
+it('excludes a manufacturer category root but keeps its individual model URL',()=>{
+ const r=SearchRequestSchema.parse({tenant_id:'t',query:'Best laptop with 16GB RAM under 80000 INR'});
+ expect(eligibility(r,m,x('https://www.lenovo.com/in/en/laptops/','Laptops for Business, Gaming, Students | Lenovo India'),'product').eligible).toBe(false);
+ expect(eligibility(r,m,x('https://www.lenovo.com/in/en/p/laptops/ideapad/slim3/len101','IdeaPad Slim 3 Gen 8'),'product').eligible).toBe(true);
+});

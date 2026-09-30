@@ -1,3 +1,4 @@
+import {fallbackIntentFormation} from "../src/core/intent-formation.js";
 import { describe,it,expect,vi } from "vitest";
 import { SearchRequestSchema } from "../src/contracts/search.js";
 import { curateParameters,curatedRequest } from "../src/core/parameter-curation.js";
@@ -97,3 +98,4 @@ it('does not leak an unreferenced agent-understanding factor into the final mand
  expect(curatedRequest(r,manifest).agent_understanding?.psychological_parameters).toEqual([]);
  const out:any=await harness().search(r);expect(out.status).toBe('complete');expect(out.plan.curation.parameters.some((p:any)=>p.key==='imagined_style')).toBe(false);
 });
+it('resolves a named local search area from the original query',()=>{const r=SearchRequestSchema.parse({tenant_id:'t',query:'Find a lunch date experience in Bandra Mumbai'});const intent=fallbackIntentFormation(r);intent.answer_unit='local_business';expect(curateParameters(r,undefined,undefined,intent).parameters.find(p=>p.key==='location')).toMatchObject({state:'resolved',value:'Bandra Mumbai',source:'query'});});

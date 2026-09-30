@@ -120,6 +120,11 @@ export class SearchHarness {
       if(finalMandate.factors.some(f=>f.key===p.key&&f.class==="psychological"))continue;
       finalMandate.factors.push({key:p.key,class:"psychological",description:`Use the stated ${p.key.replace(/_/g," ")} to rank otherwise eligible results.`,value:p.value,weight:p.priority/100,confidence:1,hard:false,evidence:[{source:"query",reference:p.evidence[0]?.reference}]});
     }
+    for(const p of curated.parameters.filter(p=>p.hard&&p.state==="resolved")){
+      const existing=finalMandate.factors.find(f=>f.key===p.key&&f.class==="functional");
+      if(existing){existing.hard=true;existing.value=p.value;existing.evidence=p.evidence as typeof existing.evidence;}
+      else finalMandate.factors.push({key:p.key,class:"functional",description:"Explicit requirement from the original request.",value:p.value,hard:true,weight:p.priority/100,confidence:1,evidence:p.evidence as any});
+    }
     record('6_final_mandate_after_fill',{mandate:finalMandate,curation_id:curated.id});
     const fillDecision={ask:[],defaults:optional.map(p=>({key:p.key,reason:"Good-to-have parameter absent; do not infer it"})),stale:curated.parameters.filter(p=>p.state==="stale").map(p=>p.key)};
     // The final query is model-written after fill. Validate the area before any
